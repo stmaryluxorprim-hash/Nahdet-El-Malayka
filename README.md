@@ -37,9 +37,12 @@
 | `/child/[code]` | بوابة الطفل: صورته، نقاطه، ترتيبه، عدد حضوره، سجل النقاط والحضور — تتحدث لحظياً |
 
 ## 🗄️ قاعدة البيانات (Supabase)
-نفّذ الملفين بالترتيب في SQL Editor:
+نفّذ الملفات بالترتيب في SQL Editor:
 1. **`supabase/schema.sql`** — الأساس: أدوار وصلاحيات، profiles، classes، children، attendance، point_transactions، app_settings، RLS، bucket للصور
 2. **`supabase/migration_v2.sql`** — إضافات v2: عمود `username`، جدول `user_permissions`، تحديث `has_permission` (دور **أو** فردية)، دالة `get_child_portal` (بوابة الطفل)، تفعيل Realtime publication لكل الجداول
+3. **`supabase/migration_v3_day_schedule.sql`** — تنظيم اليوم: جداول `day_tasks` و `day_assignments`
+4. **`supabase/migration_v4_phone_delete.sql`** — رقم تليفون فريد إجباري + دالة `admin_delete_user` (حذف الخادم نهائياً)
+5. **`supabase/migration_v5_fix_user_delete.sql`** — 🔧 **إصلاح حذف الخادم**: تحويل قيود FK (children.created_by / attendance.recorded_by / point_transactions.created_by / activity_log.user_id) إلى `ON DELETE SET NULL` + تحسين `admin_delete_user` — بدونه يفشل الحذف من التطبيق **ومن لوحة Supabase** لأي خادم سجّل أي بيانات
 
 > ⚠️ **مهم**: في Supabase → Authentication → Providers → Email: **عطّل "Confirm email"** — الدخول باسم المستخدم يستخدم بريداً داخلياً (`<username>@nahdat-app.local`).
 
