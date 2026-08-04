@@ -12,7 +12,7 @@ const MAIN_TABS = [
 
 // 👇 الصفحات الإضافية — أضِف هنا أي صفحة/موديول جديد لاحقاً
 const EXTRA_PAGES: { href: string; label: string; icon: string }[] = [
-  // مثال: { href: '/trips', label: 'الرحلات', icon: '🚌' },
+  { href: '/schedule', label: 'تنظيم اليوم', icon: '🗓️' },
 ]
 
 export default function SideDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {

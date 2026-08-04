@@ -4,16 +4,19 @@ import { getSupabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRealtime } from '@/lib/useRealtime'
 import Modal from '@/components/Modal'
-import type { Profile, Role, ClassRow, Permission } from '@/lib/types'
+import type { Profile, Role, ClassRow, Permission, DayTask } from '@/lib/types'
 
 export default function SettingsPage() {
   const { profile, user, isAdmin, hasPermission, signOut } = useAuth()
-  const [tab, setTab] = useState<'users' | 'classes' | 'points' | 'about'>(isAdmin ? 'users' : 'about')
+  const [tab, setTab] = useState<'users' | 'classes' | 'tasks' | 'points' | 'about'>(isAdmin ? 'users' : 'about')
   const [users, setUsers] = useState<Profile[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [allPerms, setAllPerms] = useState<Permission[]>([])
   const [classes, setClasses] = useState<ClassRow[]>([])
   const [newClass, setNewClass] = useState('')
+  const [dayTasks, setDayTasks] = useState<DayTask[]>([])
+  const [newTask, setNewTask] = useState({ name: '', icon: '🛠️' })
+  const [editTask, setEditTask] = useState<DayTask | null>(null)
   const [attPts, setAttPts] = useState({ present: 10, late: 5, absent: 0 })
   const [msg, setMsg] = useState('')
 
@@ -42,10 +45,15 @@ export default function SettingsPage() {
     setClasses((data as ClassRow[]) || [])
   }, [])
 
+  const loadTasks = useCallback(async () => {
+    const { data } = await getSupabase().from('day_tasks').select('*').order('sort_order')
+    setDayTasks((data as DayTask[]) || [])
+  }, [])
+
   const loadAll = useCallback(() => {
-    if (isAdmin) loadUsers()
+    if (isAdmin) { loadUsers(); loadTasks() }
     loadClasses()
-  }, [isAdmin, loadUsers, loadClasses])
+  }, [isAdmin, loadUsers, loadClasses, loadTasks])
 
   useEffect(() => {
     loadAll()
@@ -53,7 +61,7 @@ export default function SettingsPage() {
       .then(({ data }) => { if (data?.value) setAttPts(data.value) })
   }, [loadAll])
 
-  useRealtime(['profiles', 'classes', 'user_permissions'], loadAll)
+  useRealtime(['profiles', 'classes', 'user_permissions', 'day_tasks'], loadAll)
 
   const updateUser = async (id: string, patch: Partial<Profile>) => {
     const { error } = await getSupabase().from('profiles').update(patch).eq('id', id)
@@ -119,6 +127,44 @@ export default function SettingsPage() {
     setPermBusy(false)
   }
 
+  // ---- day tasks (وظائف تنظيم اليوم — للمدير فقط) ----
+  const addDayTask = async () => {
+    if (!newTask.name.trim()) return
+    const { error } = await getSupabase().from('day_tasks').insert({
+      name: newTask.name.trim(), icon: newTask.icon || '🛠️', sort_order: dayTasks.length + 1,
+    })
+    if (error) flash('❌ حدث خطأ — هل نفّذت migration_v3؟')
+    else { setNewTask({ name: '', icon: '🛠️' }); flash('✅ تمت إضافة الوظيفة'); loadTasks() }
+  }
+
+  const saveDayTask = async () => {
+    if (!editTask || !editTask.name.trim()) return
+    const { error } = await getSupabase().from('day_tasks')
+      .update({ name: editTask.name.trim(), icon: editTask.icon, description: editTask.description })
+      .eq('id', editTask.id)
+    if (error) flash('❌ حدث خطأ')
+    else { flash('✅ تم الحفظ'); setEditTask(null); loadTasks() }
+  }
+
+  const deleteDayTask = async (t: DayTask) => {
+    if (!confirm(`حذف وظيفة «${t.name}»؟ ستُحذف كل التكليفات المرتبطة بها في كل الأيام.`)) return
+    const { error } = await getSupabase().from('day_tasks').delete().eq('id', t.id)
+    if (error) flash('❌ حدث خطأ')
+    else { flash('✅ تم الحذف'); loadTasks() }
+  }
+
+  const moveTask = async (t: DayTask, dir: -1 | 1) => {
+    const idx = dayTasks.findIndex((x) => x.id === t.id)
+    const other = dayTasks[idx + dir]
+    if (!other) return
+    const supabase = getSupabase()
+    await Promise.all([
+      supabase.from('day_tasks').update({ sort_order: other.sort_order }).eq('id', t.id),
+      supabase.from('day_tasks').update({ sort_order: t.sort_order }).eq('id', other.id),
+    ])
+    loadTasks()
+  }
+
   // ---- classes / points ----
   const addClass = async () => {
     if (!newClass.trim()) return
@@ -148,6 +194,7 @@ export default function SettingsPage() {
   const TABS = [
     ...(isAdmin ? [{ key: 'users' as const, label: '👥 المستخدمون' }] : []),
     ...(hasPermission('classes.manage') ? [{ key: 'classes' as const, label: '🏫 الفصول' }] : []),
+    ...(isAdmin ? [{ key: 'tasks' as const, label: '🗂️ الوظائف' }] : []),
     ...(hasPermission('settings.manage') ? [{ key: 'points' as const, label: '⭐ النقاط' }] : []),
     { key: 'about' as const, label: '👤 حسابي' },
   ]
@@ -243,6 +290,44 @@ export default function SettingsPage() {
           </section>
         )}
 
+        {/* ===== day tasks (admin only) ===== */}
+        {tab === 'tasks' && isAdmin && (
+          <section id="tasks-section" className="space-y-2">
+            <div className="card p-3 space-y-2">
+              <p className="text-[11px] font-bold text-gray-400">
+                الوظائف تظهر في صفحة «🗓️ تنظيم اليوم» لكل يوم — إدارتها للمدير العام فقط
+              </p>
+              <div className="flex gap-2">
+                <input className="input !w-16 text-center" placeholder="🛠️" maxLength={4}
+                  value={newTask.icon} onChange={(e) => setNewTask({ ...newTask, icon: e.target.value })} />
+                <input className="input flex-1" placeholder="اسم الوظيفة الجديدة"
+                  value={newTask.name} onChange={(e) => setNewTask({ ...newTask, name: e.target.value })} />
+                <button onClick={addDayTask} className="btn-primary px-5">إضافة</button>
+              </div>
+            </div>
+            <div className="card divide-y divide-gray-50">
+              {dayTasks.length === 0 && (
+                <p className="text-center text-xs text-gray-300 font-bold p-4">لا توجد وظائف بعد</p>
+              )}
+              {dayTasks.map((t, i) => (
+                <div key={t.id} className="flex items-center gap-2 p-3">
+                  <div className="flex flex-col gap-0.5">
+                    <button onClick={() => moveTask(t, -1)} disabled={i === 0}
+                      className="text-gray-300 disabled:opacity-30 text-xs leading-none">▲</button>
+                    <button onClick={() => moveTask(t, 1)} disabled={i === dayTasks.length - 1}
+                      className="text-gray-300 disabled:opacity-30 text-xs leading-none">▼</button>
+                  </div>
+                  <p className="flex-1 font-bold text-sm text-gray-700 min-w-0 truncate">{t.icon} {t.name}</p>
+                  <button onClick={() => setEditTask({ ...t })}
+                    className="text-violet-600 text-xs font-extrabold bg-violet-50 rounded-xl px-3 py-1.5 active:scale-95 transition">تعديل</button>
+                  <button onClick={() => deleteDayTask(t)}
+                    className="text-red-500 text-xs font-extrabold bg-red-50 rounded-xl px-3 py-1.5 active:scale-95 transition">حذف</button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* ===== points ===== */}
         {tab === 'points' && (
           <section id="points-section" className="card p-4 space-y-3">
@@ -276,6 +361,24 @@ export default function SettingsPage() {
           </section>
         )}
       </div>
+
+      {/* ===== edit day task modal ===== */}
+      <Modal open={!!editTask} onClose={() => setEditTask(null)} title="✏️ تعديل الوظيفة">
+        {editTask && (
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <input className="input !w-16 text-center" maxLength={4}
+                value={editTask.icon} onChange={(e) => setEditTask({ ...editTask, icon: e.target.value })} />
+              <input className="input flex-1" placeholder="اسم الوظيفة"
+                value={editTask.name} onChange={(e) => setEditTask({ ...editTask, name: e.target.value })} />
+            </div>
+            <input className="input w-full" placeholder="وصف مختصر (اختياري)"
+              value={editTask.description || ''}
+              onChange={(e) => setEditTask({ ...editTask, description: e.target.value || null })} />
+            <button onClick={saveDayTask} className="btn-primary w-full">💾 حفظ</button>
+          </div>
+        )}
+      </Modal>
 
       {/* ===== per-user permissions modal ===== */}
       <Modal open={!!permUser} onClose={() => setPermUser(null)} title={`🛡️ صلاحيات: ${permUser?.full_name || ''}`}>
