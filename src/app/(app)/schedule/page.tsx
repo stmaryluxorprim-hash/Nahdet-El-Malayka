@@ -46,7 +46,9 @@ const CARD_GRADIENTS = [
 ]
 
 export default function SchedulePage() {
-  const { user, isAdmin } = useAuth()
+  const { user, profile, isAdmin } = useAuth()
+  // المدير والمشرف فقط يعدّلون التكليفات — الخادم يشاهد فقط
+  const canManage = isAdmin || profile?.roles?.key === 'supervisor'
   const [date, setDate] = useState<string>(todayOrFirst())
   const [tasks, setTasks] = useState<DayTask[]>([])
   const [assignments, setAssignments] = useState<DayAssignment[]>([])
@@ -98,7 +100,7 @@ export default function SchedulePage() {
       date, task_id: addTask.id, user_id: pickUserId, created_by: user?.id,
     })
     setBusy(false)
-    if (error) flash(error.code === '23505' ? '⚠️ الخادم مضاف بالفعل لهذه الوظيفة' : '❌ حدث خطأ — تأكد من الصلاحية')
+    if (error) flash(error.code === '23505' ? '⚠️ الخادم مضاف بالفعل لهذه الوظيفة' : '❌ حدث خطأ — التعديل للمدير والمشرف فقط (تأكد من تنفيذ migration_v6)')
     else { flash('✅ تمت الإضافة'); setAddTask(null); load() }
   }
 
@@ -220,7 +222,7 @@ export default function SchedulePage() {
                       ) : (
                         <span className="shrink-0 text-[10px] text-gray-300 font-bold">بدون رقم</span>
                       )}
-                      {isAdmin && (
+                      {canManage && (
                         <button onClick={() => removeAssignment(a)}
                           className="shrink-0 rounded-xl bg-red-50 text-red-500 text-xs font-extrabold px-2.5 py-2 active:scale-95 transition">
                           ✖️
@@ -229,7 +231,7 @@ export default function SchedulePage() {
                     </div>
                   ))}
 
-                  {isAdmin && (
+                  {canManage && (
                     <button onClick={() => openAdd(task)}
                       className="w-full rounded-2xl border-2 border-dashed border-violet-200 text-violet-600 text-xs font-extrabold py-2.5 active:scale-95 transition bg-violet-50/50">
                       ➕ إضافة خادم

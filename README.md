@@ -43,6 +43,7 @@
 3. **`supabase/migration_v3_day_schedule.sql`** — تنظيم اليوم: جداول `day_tasks` و `day_assignments`
 4. **`supabase/migration_v4_phone_delete.sql`** — رقم تليفون فريد إجباري + دالة `admin_delete_user` (حذف الخادم نهائياً)
 5. **`supabase/migration_v5_fix_user_delete.sql`** — 🔧 **إصلاح حذف الخادم**: تحويل قيود FK (children.created_by / attendance.recorded_by / point_transactions.created_by / activity_log.user_id) إلى `ON DELETE SET NULL` + تحسين `admin_delete_user` — بدونه يفشل الحذف من التطبيق **ومن لوحة Supabase** لأي خادم سجّل أي بيانات
+6. **`supabase/migration_v6_schedule_supervisor.sql`** — 🗓️ **صلاحيات تنظيم اليوم**: المدير **والمشرف** فقط يضيفون/يزيلون خدام الوظائف (`day_assignments`) — الخادم يشاهد التقسيمة فقط. الوظائف نفسها (`day_tasks`) تبقى للمدير فقط
 
 > ⚠️ **مهم**: في Supabase → Authentication → Providers → Email: **عطّل "Confirm email"** — الدخول باسم المستخدم يستخدم بريداً داخلياً (`<username>@nahdat-app.local`).
 
