@@ -78,8 +78,18 @@ export default function SettingsPage() {
     if (!confirm(`⚠️ حذف «${u.full_name}» نهائياً؟\nسيُحذف حسابه وكل صلاحياته وتكليفاته ولا يمكن التراجع!`)) return
     if (!confirm('متأكد تماماً؟ الحذف نهائي ولا رجعة فيه.')) return
     const { error } = await getSupabase().rpc('admin_delete_user', { target_id: u.id })
-    if (error) flash('❌ تعذر الحذف — هل نُفّذ migration_v4؟')
-    else { flash('🗑️ تم حذف الخادم نهائياً'); loadUsers() }
+    if (error) {
+      const msg = error.message || ''
+      if (msg.includes('function') && msg.includes('does not exist'))
+        flash('❌ تعذر الحذف — نفّذ migration_v4 و migration_v5 في Supabase أولاً')
+      else if (msg.includes('foreign key') || msg.includes('violates'))
+        flash('❌ تعذر الحذف بسبب سجلات مرتبطة — نفّذ migration_v5_fix_user_delete.sql في Supabase')
+      else if (msg.includes('not authorized'))
+        flash('❌ الحذف متاح للمدير فقط')
+      else
+        flash(`❌ تعذر الحذف: ${msg}`)
+      console.error('admin_delete_user error:', error)
+    } else { flash('🗑️ تم حذف الخادم نهائياً'); loadUsers() }
   }
 
   // ---- permissions modal ----
