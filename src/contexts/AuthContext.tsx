@@ -1,5 +1,5 @@
 'use client'
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback, useRef, ReactNode } from 'react'
 import { getSupabase } from '@/lib/supabase'
 import type { Profile } from '@/lib/types'
 import type { User } from '@supabase/supabase-js'
@@ -32,15 +32,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: prof } = await supabase
       .from('profiles').select('*, roles(*)').eq('id', uid).single()
     setProfile(prof as Profile | null)
+
+    const keys = new Set<string>()
     if (prof?.role_id) {
       const { data: perms } = await supabase
         .from('role_permissions')
         .select('permissions(key)')
         .eq('role_id', prof.role_id)
-      setPermissions(new Set((perms || []).map((p: any) => p.permissions?.key).filter(Boolean)))
-    } else {
-      setPermissions(new Set())
+      ;(perms || []).forEach((p: any) => { if (p.permissions?.key) keys.add(p.permissions.key) })
     }
+    // per-user extra permissions (v2)
+    const { data: uperms } = await supabase
+      .from('user_permissions')
+      .select('permissions(key)')
+      .eq('user_id', uid)
+    ;(uperms || []).forEach((p: any) => { if (p.permissions?.key) keys.add(p.permissions.key) })
+
+    setPermissions(keys)
   }, [])
 
   useEffect(() => {
@@ -59,6 +67,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     })
     return () => sub.subscription.unsubscribe()
   }, [loadProfile])
+
+  // Realtime: react instantly when MY profile row or MY permissions change
+  const loadRef = useRef(loadProfile)
+  loadRef.current = loadProfile
+  useEffect(() => {
+    if (!user) return
+    const supabase = getSupabase()
+    const ch = supabase.channel(`rt-self-${user.id}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'profiles', filter: `id=eq.${user.id}` },
+        () => loadRef.current(user.id))
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'user_permissions', filter: `user_id=eq.${user.id}` },
+        () => loadRef.current(user.id))
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [user])
 
   const refreshProfile = useCallback(async () => {
     if (user) await loadProfile(user.id)

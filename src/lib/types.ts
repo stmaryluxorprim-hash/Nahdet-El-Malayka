@@ -8,6 +8,7 @@ export interface Permission { id: number; key: string; name_ar: string }
 export interface Profile {
   id: string
   full_name: string
+  username: string | null
   phone: string | null
   role_id: number | null
   status: UserStatus
@@ -40,6 +41,14 @@ export interface AttendanceRow {
   date: string
   status: AttendanceStatus
   recorded_by: string | null
+}
+
+export interface UserPermission {
+  id: number
+  user_id: string
+  permission_id: number
+  granted_by: string | null
+  permissions?: Permission | null
 }
 
 export interface PointTx {

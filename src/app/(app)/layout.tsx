@@ -5,9 +5,9 @@ import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
 
 const NAV = [
+  { href: '/home', label: 'الرئيسية', icon: '🏠' },
   { href: '/children', label: 'الأطفال', icon: '👼' },
-  { href: '/classes', label: 'الفصول', icon: '🏫' },
-  { href: '/scanner', label: 'المسح', icon: '📷' },
+  { href: '/scanner', label: 'الماسح', icon: '📷' },
   { href: '/statistics', label: 'الإحصائيات', icon: '📊' },
   { href: '/settings', label: 'الإعدادات', icon: '⚙️' },
 ]
@@ -25,23 +25,25 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
 
   if (loading || !user || profile?.status !== 'approved') {
     return (
-      <main className="min-h-screen flex items-center justify-center">
-        <div className="text-violet-600 text-lg font-bold animate-pulse">جاري التحميل...</div>
+      <main className="min-h-screen flex items-center justify-center auth-bg">
+        <div className="text-violet-600 text-lg font-extrabold animate-pulse">جاري التحميل...</div>
       </main>
     )
   }
 
   return (
-    <div className="min-h-screen bg-gray-50 pb-20">
+    <div className="min-h-screen pb-28">
       <main className="max-w-2xl mx-auto">{children}</main>
-      <nav id="bottom-nav" className="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 shadow-lg z-40">
-        <div className="max-w-2xl mx-auto flex justify-around">
+      <nav id="bottom-nav" className="fixed bottom-3 inset-x-3 z-40">
+        <div className="max-w-2xl mx-auto glass rounded-3xl px-2 py-1.5 flex justify-around">
           {NAV.map((item) => {
             const active = pathname.startsWith(item.href)
             return (
               <Link key={item.href} href={item.href}
-                className={`flex flex-col items-center py-2 px-3 text-xs font-semibold transition ${active ? 'text-violet-600' : 'text-gray-400'}`}>
-                <span className="text-xl mb-0.5">{item.icon}</span>
+                className={`flex flex-col items-center gap-0.5 rounded-2xl px-3 py-1.5 text-[10px] font-bold transition-all ${
+                  active ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/30 scale-105' : 'text-gray-400'
+                }`}>
+                <span className="text-lg leading-none">{item.icon}</span>
                 {item.label}
               </Link>
             )

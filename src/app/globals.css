@@ -4,12 +4,58 @@
 
 :root {
   --primary: #7c3aed;
+  --primary-dark: #6d28d9;
 }
 
 html { font-family: 'Cairo', sans-serif; }
 .font-cairo { font-family: 'Cairo', sans-serif; }
 
-body { -webkit-tap-highlight-color: transparent; }
+body {
+  -webkit-tap-highlight-color: transparent;
+  background: #f4f4fb;
+}
+
+/* ============ v2 design system ============ */
+
+.card {
+  @apply bg-white rounded-3xl shadow-[0_2px_16px_rgba(124,58,237,0.08)] border border-violet-50;
+}
+
+.btn-primary {
+  @apply bg-gradient-to-l from-violet-600 to-fuchsia-600 text-white font-bold rounded-2xl px-4 py-3
+    shadow-lg shadow-violet-600/25 active:scale-95 transition-all disabled:opacity-50 disabled:active:scale-100;
+}
+
+.btn-soft {
+  @apply bg-violet-50 text-violet-700 font-bold rounded-2xl px-4 py-3 active:scale-95 transition-all;
+}
+
+.input {
+  @apply w-full rounded-2xl border-2 border-gray-100 bg-gray-50 px-4 py-3 text-sm font-semibold
+    focus:border-violet-400 focus:bg-white focus:outline-none transition-colors;
+}
+
+.chip {
+  @apply inline-flex items-center gap-1 rounded-full px-3.5 py-2 text-xs font-bold whitespace-nowrap
+    border-2 transition-all active:scale-95;
+}
+.chip-on { @apply bg-violet-600 border-violet-600 text-white shadow-md shadow-violet-600/30; }
+.chip-off { @apply bg-white border-gray-100 text-gray-500; }
+
+.hero-gradient {
+  background: linear-gradient(135deg, #7c3aed 0%, #a855f7 55%, #d946ef 100%);
+}
+
+.auth-bg {
+  background:
+    radial-gradient(1000px 500px at 90% -10%, rgba(217,70,239,.25), transparent 60%),
+    radial-gradient(800px 500px at -10% 110%, rgba(124,58,237,.25), transparent 60%),
+    linear-gradient(160deg, #f5f3ff 0%, #faf5ff 60%, #fdf4ff 100%);
+}
+
+.glass {
+  @apply bg-white/80 backdrop-blur-xl border border-white/60 shadow-[0_8px_40px_rgba(124,58,237,0.12)];
+}
 
 /* qr scanner region */
 #qr-reader video { border-radius: 1rem; }
@@ -22,3 +68,10 @@ body { -webkit-tap-highlight-color: transparent; }
 
 .animate-fadeIn { animation: fadeIn .2s ease-out; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(8px);} to { opacity: 1; transform: none;} }
+
+.animate-pop { animation: pop .25s cubic-bezier(.34,1.56,.64,1); }
+@keyframes pop { from { opacity: 0; transform: scale(.85);} to { opacity: 1; transform: scale(1);} }
+
+/* hide scrollbars for chip rows */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
