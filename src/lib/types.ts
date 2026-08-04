@@ -51,6 +51,27 @@ export interface UserPermission {
   permissions?: Permission | null
 }
 
+export interface DayTask {
+  id: string
+  name: string
+  icon: string
+  description: string | null
+  sort_order: number
+  created_at: string
+}
+
+export interface DayAssignment {
+  id: string
+  date: string
+  task_id: string
+  user_id: string
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  profiles?: Pick<Profile, 'id' | 'full_name' | 'phone' | 'avatar_url'> | null
+  day_tasks?: DayTask | null
+}
+
 export interface PointTx {
   id: string
   child_id: string
