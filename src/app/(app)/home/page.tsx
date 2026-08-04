@@ -47,15 +47,14 @@ export default function HomePage() {
 
   return (
     <div className="animate-fadeIn">
-      {/* hero */}
-      <header id="home-hero" className="hero-gradient text-white px-5 pt-8 pb-14 rounded-b-[2.5rem]">
-        <p className="text-white/80 text-sm font-bold">أهلاً بك 👋</p>
-        <h1 className="text-2xl font-extrabold mt-0.5">{profile?.full_name || '...'}</h1>
-        <p className="text-white/70 text-xs font-semibold mt-1">⚡ كل البيانات محدثة لحظياً</p>
-      </header>
+      {/* greeting */}
+      <div className="px-5 pt-4">
+        <p className="text-gray-400 text-sm font-bold">أهلاً بك 👋</p>
+        <h2 className="text-2xl font-extrabold text-violet-700 mt-0.5">{profile?.full_name || '...'}</h2>
+      </div>
 
       {/* stat cards */}
-      <section id="home-stats" className="px-4 -mt-8 grid grid-cols-2 gap-3">
+      <section id="home-stats" className="px-4 mt-3 grid grid-cols-2 gap-3">
         <div className="card p-4 text-center">
           <div className="text-3xl">👼</div>
           <div className="text-2xl font-extrabold text-violet-700">{stats.children}</div>

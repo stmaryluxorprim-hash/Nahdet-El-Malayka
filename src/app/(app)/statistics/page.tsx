@@ -66,12 +66,7 @@ export default function StatisticsPage() {
 
   return (
     <div className="animate-fadeIn">
-      <header className="hero-gradient text-white px-5 pt-8 pb-12 rounded-b-[2.5rem]">
-        <h1 className="text-2xl font-extrabold">📊 الإحصائيات</h1>
-        <p className="text-white/70 text-xs font-semibold mt-1">تحديث لحظي مباشر ⚡</p>
-      </header>
-
-      <div className="px-4 -mt-6 space-y-4 pb-4">
+      <div className="px-4 pt-4 space-y-4 pb-4">
 
       <section className="grid grid-cols-2 gap-3">
         {[

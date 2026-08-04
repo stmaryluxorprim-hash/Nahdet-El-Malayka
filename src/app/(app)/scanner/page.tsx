@@ -4,9 +4,8 @@ import { getSupabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import QrScanner from '@/components/QrScanner'
 import ChildActionsSheet from '@/components/ChildActionsSheet'
+import { useUi } from '@/contexts/UiContext'
 import type { Child } from '@/lib/types'
-
-const todayStr = () => new Date().toISOString().slice(0, 10)
 
 type Mode = 'attendance' | 'addPoints' | 'subPoints' | 'view'
 
@@ -26,9 +25,9 @@ function beep(ok: boolean) {
 
 export default function ScannerPage() {
   const { hasPermission, user } = useAuth()
+  const { date } = useUi()
   const [mode, setMode] = useState<Mode>('attendance')
   const [points, setPoints] = useState('5')
-  const [date, setDate] = useState(todayStr())
   const [active, setActive] = useState(false)
   const [result, setResult] = useState<{ child: Child; text: string; ok: boolean } | null>(null)
   const [history, setHistory] = useState<HistoryItem[]>([])
@@ -122,12 +121,7 @@ export default function ScannerPage() {
 
   return (
     <div className="animate-fadeIn">
-      <header className="hero-gradient text-white px-5 pt-8 pb-12 rounded-b-[2.5rem]">
-        <h1 className="text-2xl font-extrabold">📷 الماسح الضوئي</h1>
-        <p className="text-white/70 text-xs font-semibold mt-1">اختر الوظيفة ثم امسح الكروت بشكل متتالي ⚡</p>
-      </header>
-
-      <div className="px-4 -mt-6 space-y-3 pb-4">
+      <div className="px-4 pt-4 space-y-3 pb-4">
         {/* mode selector */}
         <section id="scan-modes" className="card p-3">
           <p className="text-[11px] font-extrabold text-gray-400 mb-2">وظيفة المسح</p>
@@ -149,7 +143,7 @@ export default function ScannerPage() {
                   value={points} onChange={(e) => setPoints(e.target.value)} />
               </div>
             )}
-            <input id="scan-date" type="date" className="input !py-2 flex-1" value={date} onChange={(e) => setDate(e.target.value)} />
+            <p className="text-[11px] text-gray-400 font-bold shrink-0">📅 {date}</p>
           </div>
           {mode === 'attendance' && (
             <p className="text-[11px] text-gray-400 font-semibold mt-2">كل مسح = تسجيل حضور {parseInt(points) > 0 ? `+ ${parseInt(points)} نقطة تلقائياً` : 'بدون نقاط'}</p>
