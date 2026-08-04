@@ -9,7 +9,7 @@ export default function PendingPage() {
   const { profile, loading, signOut, refreshProfile } = useAuth()
 
   useEffect(() => {
-    if (!loading && profile?.status === 'approved') router.replace('/children')
+    if (!loading && profile?.status === 'approved') router.replace('/home')
   }, [loading, profile, router])
 
   return (

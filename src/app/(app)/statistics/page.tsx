@@ -1,6 +1,7 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { getSupabase } from '@/lib/supabase'
+import { useRealtime } from '@/lib/useRealtime'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from 'recharts'
 import type { ClassRow } from '@/lib/types'
 
@@ -16,8 +17,7 @@ export default function StatisticsPage() {
   const [top, setTop] = useState<{ name: string; total_points: number; photo_url: string | null; gender: string }[]>([])
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    const load = async () => {
+  const load = useCallback(async () => {
       const supabase = getSupabase()
       const today = daysAgo(0)
       const weekStart = daysAgo(6)
@@ -57,15 +57,21 @@ export default function StatisticsPage() {
       setTrend(days)
       setTop(topKids.data || [])
       setLoading(false)
-    }
-    load()
   }, [])
+
+  useEffect(() => { load() }, [load])
+  useRealtime(['children', 'attendance', 'point_transactions', 'profiles', 'classes'], load)
 
   if (loading) return <p className="text-center text-gray-400 py-16 font-bold">جاري التحميل...</p>
 
   return (
-    <div className="p-4 space-y-5">
-      <h1 className="text-2xl font-extrabold text-gray-800">📊 الإحصائيات</h1>
+    <div className="animate-fadeIn">
+      <header className="hero-gradient text-white px-5 pt-8 pb-12 rounded-b-[2.5rem]">
+        <h1 className="text-2xl font-extrabold">📊 الإحصائيات</h1>
+        <p className="text-white/70 text-xs font-semibold mt-1">تحديث لحظي مباشر ⚡</p>
+      </header>
+
+      <div className="px-4 -mt-6 space-y-4 pb-4">
 
       <section className="grid grid-cols-2 gap-3">
         {[
@@ -74,7 +80,7 @@ export default function StatisticsPage() {
           { label: 'نقاط هذا الأسبوع', value: totals.weekPoints, icon: '⭐', bg: 'bg-amber-50 text-amber-700' },
           { label: 'الخدام المعتمدون', value: totals.users, icon: '🙋', bg: 'bg-blue-50 text-blue-700' },
         ].map(card => (
-          <div key={card.label} className={`rounded-2xl p-4 ${card.bg}`}>
+          <div key={card.label} className={`card p-4 ${card.bg}`}>
             <p className="text-2xl">{card.icon}</p>
             <p className="text-3xl font-extrabold mt-1">{card.value}</p>
             <p className="text-xs font-bold opacity-70">{card.label}</p>
@@ -82,8 +88,8 @@ export default function StatisticsPage() {
         ))}
       </section>
 
-      <section className="bg-white rounded-2xl p-4 shadow-sm">
-        <h2 className="font-bold text-gray-700 mb-3">حضور آخر 7 أيام</h2>
+      <section className="card p-4">
+        <h2 className="font-extrabold text-gray-700 mb-3">حضور آخر 7 أيام</h2>
         <ResponsiveContainer width="100%" height={180}>
           <LineChart data={trend}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -95,8 +101,8 @@ export default function StatisticsPage() {
         </ResponsiveContainer>
       </section>
 
-      <section className="bg-white rounded-2xl p-4 shadow-sm">
-        <h2 className="font-bold text-gray-700 mb-3">حضور اليوم حسب الفصل</h2>
+      <section className="card p-4">
+        <h2 className="font-extrabold text-gray-700 mb-3">حضور اليوم حسب الفصل</h2>
         <ResponsiveContainer width="100%" height={200}>
           <BarChart data={classStats}>
             <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -109,8 +115,8 @@ export default function StatisticsPage() {
         </ResponsiveContainer>
       </section>
 
-      <section className="bg-white rounded-2xl p-4 shadow-sm">
-        <h2 className="font-bold text-gray-700 mb-3">🏆 أعلى 10 أطفال بالنقاط</h2>
+      <section className="card p-4">
+        <h2 className="font-extrabold text-gray-700 mb-3">🏆 أعلى 10 أطفال بالنقاط</h2>
         <ul className="space-y-2">
           {top.map((c, i) => (
             <li key={i} className="flex items-center gap-3">
@@ -125,6 +131,7 @@ export default function StatisticsPage() {
           {top.length === 0 && <p className="text-gray-400 text-sm text-center py-4">لا توجد بيانات بعد</p>}
         </ul>
       </section>
+      </div>
     </div>
   )
 }

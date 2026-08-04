@@ -11,7 +11,7 @@ export default function Home() {
     if (loading) return
     if (!user) router.replace('/login')
     else if (profile?.status !== 'approved') router.replace('/pending')
-    else router.replace('/children')
+    else router.replace('/home')
   }, [user, profile, loading, router])
 
   return (
