@@ -2,75 +2,75 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
-import Image from 'next/image'
 import { getSupabase } from '@/lib/supabase'
+import { usernameToEmail, isValidUsername } from '@/lib/username'
 
 export default function RegisterPage() {
   const router = useRouter()
   const [fullName, setFullName] = useState('')
-  const [phone, setPhone] = useState('')
-  const [email, setEmail] = useState('')
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
 
-  const handleRegister = async (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
-    if (password.length < 6) { setError('كلمة المرور يجب أن تكون 6 أحرف على الأقل'); return }
-    setLoading(true)
+    const uname = username.trim().toLowerCase()
+    if (!isValidUsername(uname)) {
+      setError('اسم المستخدم: من 3 إلى 30 حرفاً (حروف إنجليزية وأرقام و _ و . فقط)')
+      return
+    }
+    if (password.length < 6) { setError('كلمة المرور 6 أحرف على الأقل'); return }
+    setBusy(true)
     const supabase = getSupabase()
+
+    // pre-check username availability
+    const { data: existing } = await supabase
+      .from('profiles').select('id').eq('username', uname).maybeSingle()
+    if (existing) { setBusy(false); setError('اسم المستخدم محجوز، اختر اسماً آخر'); return }
+
     const { error: err } = await supabase.auth.signUp({
-      email, password,
-      options: { data: { full_name: fullName, phone } },
+      email: usernameToEmail(uname),
+      password,
+      options: { data: { full_name: fullName.trim(), username: uname } },
     })
+    setBusy(false)
     if (err) {
-      setError(err.message.includes('already') ? 'هذا البريد الإلكتروني مسجل بالفعل' : 'حدث خطأ أثناء إنشاء الحساب')
-      setLoading(false)
+      setError(err.message.includes('already registered') ? 'اسم المستخدم محجوز بالفعل' : 'حدث خطأ، حاول مرة أخرى')
       return
     }
     router.replace('/pending')
   }
 
   return (
-    <main className="min-h-screen flex items-center justify-center bg-gradient-to-br from-violet-600 to-purple-800 p-4">
-      <section className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md animate-fadeIn">
+    <main className="min-h-screen auth-bg flex items-center justify-center p-4">
+      <section id="register-card" className="glass rounded-[2rem] w-full max-w-md p-7 animate-pop">
         <header className="text-center mb-6">
-          <Image src="/icons/icon-192.png" alt="نهضة الملائكة" width={72} height={72} className="mx-auto rounded-2xl shadow-lg" />
-          <h1 className="text-2xl font-extrabold text-gray-800 mt-3">إنشاء حساب جديد</h1>
-          <p className="text-gray-500 mt-1 text-sm">سيتم مراجعة حسابك من قبل المدير قبل التفعيل</p>
+          <div className="text-6xl mb-2">✨</div>
+          <h1 className="text-2xl font-extrabold text-violet-800">إنشاء حساب خادم</h1>
+          <p className="text-sm text-gray-500 font-semibold mt-1">سيتم تفعيل حسابك بعد موافقة المسؤول</p>
         </header>
-        <form onSubmit={handleRegister} className="space-y-4">
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">الاسم الكامل</label>
-            <input type="text" required value={fullName} onChange={e => setFullName(e.target.value)}
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-violet-500 outline-none" placeholder="الاسم الكامل" />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">رقم الهاتف</label>
-            <input type="tel" dir="ltr" value={phone} onChange={e => setPhone(e.target.value)}
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-violet-500 outline-none text-left" placeholder="+201XXXXXXXXX" />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">البريد الإلكتروني</label>
-            <input type="email" required dir="ltr" value={email} onChange={e => setEmail(e.target.value)}
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-violet-500 outline-none text-left" placeholder="you@example.com" />
-          </div>
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">كلمة المرور</label>
-            <input type="password" required dir="ltr" value={password} onChange={e => setPassword(e.target.value)}
-              className="w-full border border-gray-300 rounded-xl px-4 py-3 focus:ring-2 focus:ring-violet-500 outline-none text-left" placeholder="••••••••" />
-          </div>
-          {error && <p className="text-red-600 text-sm font-semibold bg-red-50 rounded-lg p-3">{error}</p>}
-          <button type="submit" disabled={loading}
-            className="w-full bg-violet-600 hover:bg-violet-700 text-white font-bold py-3 rounded-xl transition disabled:opacity-50">
-            {loading ? 'جاري الإنشاء...' : 'إنشاء الحساب'}
+
+        {error && (
+          <p className="bg-red-50 text-red-600 text-sm font-bold rounded-2xl px-4 py-3 mb-4 animate-fadeIn">{error}</p>
+        )}
+
+        <form onSubmit={submit} className="space-y-4">
+          <input id="reg-fullname" className="input" placeholder="الاسم الكامل"
+            value={fullName} onChange={(e) => setFullName(e.target.value)} required />
+          <input id="reg-username" className="input" placeholder="اسم المستخدم (إنجليزي)" dir="ltr"
+            value={username} onChange={(e) => setUsername(e.target.value)} required autoComplete="username" />
+          <input id="reg-password" className="input" type="password" placeholder="كلمة المرور (6+ أحرف)" dir="ltr"
+            value={password} onChange={(e) => setPassword(e.target.value)} required autoComplete="new-password" />
+          <button type="submit" className="btn-primary w-full" disabled={busy}>
+            {busy ? 'جاري الإنشاء...' : 'إنشاء الحساب'}
           </button>
+          <p className="text-center text-sm text-gray-500 font-semibold">
+            لديك حساب بالفعل؟{' '}
+            <Link href="/login" className="text-violet-600 font-extrabold">تسجيل الدخول</Link>
+          </p>
         </form>
-        <p className="text-center text-gray-600 mt-6">
-          لديك حساب بالفعل؟{' '}
-          <Link href="/login" className="text-violet-600 font-bold hover:underline">تسجيل الدخول</Link>
-        </p>
       </section>
     </main>
   )
