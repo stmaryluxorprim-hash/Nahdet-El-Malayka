@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { getSupabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRealtime } from '@/lib/useRealtime'
@@ -7,20 +7,18 @@ import QrScanner from '@/components/QrScanner'
 import Modal from '@/components/Modal'
 import ChildFormModal from '@/components/ChildFormModal'
 import ChildActionsSheet from '@/components/ChildActionsSheet'
-import SideDrawer from '@/components/SideDrawer'
+import { useUi } from '@/contexts/UiContext'
 import type { Child, ClassRow } from '@/lib/types'
-
-const todayStr = () => new Date().toISOString().slice(0, 10)
 
 type Func = 'none' | 'attendance' | 'addPoints' | 'subPoints' | 'call' | 'whatsapp'
 
 export default function ChildrenPage() {
   const { hasPermission, user } = useAuth()
+  const { date } = useUi()
   const [children, setChildren] = useState<Child[]>([])
   const [classes, setClasses] = useState<ClassRow[]>([])
   const [presentIds, setPresentIds] = useState<Set<string>>(new Set())
   const [classId, setClassId] = useState<string>('all')
-  const [date, setDate] = useState(todayStr())
   const [func, setFunc] = useState<Func>('none')
   const [points, setPoints] = useState('5')
   const [search, setSearch] = useState('')
@@ -32,16 +30,6 @@ export default function ChildrenPage() {
   const [editChild, setEditChild] = useState<Child | null>(null)
   const [selected, setSelected] = useState<Child | null>(null)
   const [scanErr, setScanErr] = useState('')
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const dateRef = useRef<HTMLInputElement>(null)
-
-  const openDatePicker = () => {
-    const el = dateRef.current
-    if (!el) return
-    // @ts-ignore - showPicker مدعوم في المتصفحات الحديثة
-    if (el.showPicker) el.showPicker()
-    else { el.focus(); el.click() }
-  }
 
   const load = useCallback(async () => {
     const supabase = getSupabase()
@@ -173,35 +161,16 @@ export default function ChildrenPage() {
 
   return (
     <div className="animate-fadeIn">
-      <header className="hero-gradient text-white px-5 pt-8 pb-12 rounded-b-[2.5rem] flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-extrabold">👼 الأطفال</h1>
-          <p className="text-white/70 text-xs font-semibold mt-1">{filtered.length} طفل · تحديث لحظي ⚡</p>
-        </div>
-        <div className="flex items-center gap-2">
+      <div className="px-4 pt-4 space-y-3">
+        {/* count + add button */}
+        <div className="flex items-center justify-between px-1">
+          <p className="text-xs font-extrabold text-gray-400">{filtered.length} طفل</p>
           {hasPermission('children.create') && (
             <button id="add-child-btn" onClick={() => { setScanErr(''); setScanOpen(true) }}
-              className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur text-white text-2xl font-bold active:scale-90 transition">+</button>
+              className="rounded-xl bg-violet-600 text-white text-xs font-extrabold px-4 py-2 shadow-md shadow-violet-600/30 active:scale-95 transition">➕ إضافة طفل</button>
           )}
-          {/* زر اختيار التاريخ */}
-          <div className="relative">
-            <button id="date-btn" onClick={openDatePicker} title={date}
-              className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur text-white text-xl active:scale-90 transition">📅</button>
-            <input ref={dateRef} id="date-input" type="date" value={date}
-              onChange={(e) => e.target.value && setDate(e.target.value)}
-              className="absolute inset-0 w-full h-full opacity-0 pointer-events-none" tabIndex={-1} />
-          </div>
-          {/* زر القائمة الجانبية ☰ */}
-          <button id="menu-btn" onClick={() => setDrawerOpen(true)} aria-label="القائمة"
-            className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur text-white active:scale-90 transition flex flex-col items-center justify-center gap-[5px]">
-            <span className="block w-5 h-[2.5px] rounded-full bg-white" />
-            <span className="block w-5 h-[2.5px] rounded-full bg-white" />
-            <span className="block w-5 h-[2.5px] rounded-full bg-white" />
-          </button>
         </div>
-      </header>
 
-      <div className="px-4 -mt-6 space-y-3">
         {/* class select + function dropdown */}
         <div className="card p-3 grid grid-cols-2 gap-2">
           <select id="class-select" className="input" value={classId} onChange={(e) => setClassId(e.target.value)}>
@@ -273,8 +242,6 @@ export default function ChildrenPage() {
           </div>
         )}
       </div>
-
-      <SideDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
 
       {/* QR scan modal for new child */}
       <Modal open={scanOpen} onClose={() => setScanOpen(false)} title="امسح كود QR للطفل الجديد">

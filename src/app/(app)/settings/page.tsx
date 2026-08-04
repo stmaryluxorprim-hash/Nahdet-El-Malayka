@@ -154,12 +154,7 @@ export default function SettingsPage() {
 
   return (
     <div className="animate-fadeIn">
-      <header className="hero-gradient text-white px-5 pt-8 pb-12 rounded-b-[2.5rem]">
-        <h1 className="text-2xl font-extrabold">⚙️ الإعدادات</h1>
-        <p className="text-white/70 text-xs font-semibold mt-1">إدارة المستخدمين والصلاحيات والفصول ⚡</p>
-      </header>
-
-      <div className="px-4 -mt-6 space-y-3 pb-4">
+      <div className="px-4 pt-4 space-y-3 pb-4">
         {msg && <p className="card p-3 text-center text-sm font-bold text-violet-700 animate-pop">{msg}</p>}
 
         <div className="flex gap-2 overflow-x-auto no-scrollbar">
