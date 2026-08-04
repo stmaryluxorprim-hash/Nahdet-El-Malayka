@@ -74,6 +74,14 @@ export default function SettingsPage() {
     await updateUser(u.id, { status: 'approved', role_id: u.role_id ?? servant?.id ?? null } as Partial<Profile>)
   }
 
+  const deleteUser = async (u: Profile) => {
+    if (!confirm(`⚠️ حذف «${u.full_name}» نهائياً؟\nسيُحذف حسابه وكل صلاحياته وتكليفاته ولا يمكن التراجع!`)) return
+    if (!confirm('متأكد تماماً؟ الحذف نهائي ولا رجعة فيه.')) return
+    const { error } = await getSupabase().rpc('admin_delete_user', { target_id: u.id })
+    if (error) flash('❌ تعذر الحذف — هل نُفّذ migration_v4؟')
+    else { flash('🗑️ تم حذف الخادم نهائياً'); loadUsers() }
+  }
+
   // ---- permissions modal ----
   const openPerms = async (u: Profile) => {
     setPermUser(u)
@@ -222,6 +230,7 @@ export default function SettingsPage() {
                   <div className="min-w-0">
                     <p className="font-extrabold text-gray-800 truncate">{u.full_name}</p>
                     <p className="text-[11px] text-gray-400 font-semibold" dir="ltr">@{u.username || '—'}</p>
+                    {u.phone && <p className="text-[11px] text-gray-400 font-semibold" dir="ltr">📞 {u.phone}</p>}
                   </div>
                   <span className={`text-[10px] font-extrabold rounded-full px-2.5 py-1 shrink-0 ${statusBadge(u.status)}`}>
                     {statusLabel(u.status)}
@@ -264,6 +273,12 @@ export default function SettingsPage() {
                     className="rounded-xl bg-violet-50 text-violet-700 text-xs font-extrabold px-3 py-2 active:scale-95 transition">
                     🛡️ الصلاحيات
                   </button>
+                  {u.id !== profile?.id && (
+                    <button onClick={() => deleteUser(u)}
+                      className="rounded-xl bg-red-600 text-white text-xs font-extrabold px-3 py-2 active:scale-95 transition shadow-md shadow-red-600/25">
+                      🗑️ حذف نهائي
+                    </button>
+                  )}
                 </div>
               </div>
             ))}
