@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { getSupabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRealtime } from '@/lib/useRealtime'
@@ -7,6 +7,7 @@ import QrScanner from '@/components/QrScanner'
 import Modal from '@/components/Modal'
 import ChildFormModal from '@/components/ChildFormModal'
 import ChildActionsSheet from '@/components/ChildActionsSheet'
+import SideDrawer from '@/components/SideDrawer'
 import type { Child, ClassRow } from '@/lib/types'
 
 const todayStr = () => new Date().toISOString().slice(0, 10)
@@ -31,6 +32,16 @@ export default function ChildrenPage() {
   const [editChild, setEditChild] = useState<Child | null>(null)
   const [selected, setSelected] = useState<Child | null>(null)
   const [scanErr, setScanErr] = useState('')
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const dateRef = useRef<HTMLInputElement>(null)
+
+  const openDatePicker = () => {
+    const el = dateRef.current
+    if (!el) return
+    // @ts-ignore - showPicker مدعوم في المتصفحات الحديثة
+    if (el.showPicker) el.showPicker()
+    else { el.focus(); el.click() }
+  }
 
   const load = useCallback(async () => {
     const supabase = getSupabase()
@@ -118,6 +129,24 @@ export default function ChildrenPage() {
     (classId === 'all' || c.class_id === classId) &&
     (c.name.includes(search) || c.phone.includes(search) || c.code.includes(search)))
 
+  // تجميع الأطفال حسب الفصول (بترتيب الفصول، ثم "بدون فصل" في الآخر)
+  const groups = useMemo(() => {
+    const byClass = new Map<string, Child[]>()
+    for (const c of filtered) {
+      const key = c.class_id || 'none'
+      if (!byClass.has(key)) byClass.set(key, [])
+      byClass.get(key)!.push(c)
+    }
+    const result: { id: string; name: string; kids: Child[] }[] = []
+    for (const cl of classes) {
+      const kids = byClass.get(cl.id)
+      if (kids?.length) result.push({ id: cl.id, name: cl.name, kids })
+    }
+    const noClass = byClass.get('none')
+    if (noClass?.length) result.push({ id: 'none', name: 'بدون فصل', kids: noClass })
+    return result
+  }, [filtered, classes])
+
   const funcBtn = (c: Child) => {
     if (func === 'none') return null
     if (flash?.id === c.id) {
@@ -149,42 +178,54 @@ export default function ChildrenPage() {
           <h1 className="text-2xl font-extrabold">👼 الأطفال</h1>
           <p className="text-white/70 text-xs font-semibold mt-1">{filtered.length} طفل · تحديث لحظي ⚡</p>
         </div>
-        {hasPermission('children.create') && (
-          <button id="add-child-btn" onClick={() => { setScanErr(''); setScanOpen(true) }}
-            className="w-12 h-12 rounded-2xl bg-white/20 backdrop-blur text-white text-2xl font-bold active:scale-90 transition">+</button>
-        )}
+        <div className="flex items-center gap-2">
+          {hasPermission('children.create') && (
+            <button id="add-child-btn" onClick={() => { setScanErr(''); setScanOpen(true) }}
+              className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur text-white text-2xl font-bold active:scale-90 transition">+</button>
+          )}
+          {/* زر اختيار التاريخ */}
+          <div className="relative">
+            <button id="date-btn" onClick={openDatePicker} title={date}
+              className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur text-white text-xl active:scale-90 transition">📅</button>
+            <input ref={dateRef} id="date-input" type="date" value={date}
+              onChange={(e) => e.target.value && setDate(e.target.value)}
+              className="absolute inset-0 w-full h-full opacity-0 pointer-events-none" tabIndex={-1} />
+          </div>
+          {/* زر القائمة الجانبية ☰ */}
+          <button id="menu-btn" onClick={() => setDrawerOpen(true)} aria-label="القائمة"
+            className="w-11 h-11 rounded-2xl bg-white/20 backdrop-blur text-white active:scale-90 transition flex flex-col items-center justify-center gap-[5px]">
+            <span className="block w-5 h-[2.5px] rounded-full bg-white" />
+            <span className="block w-5 h-[2.5px] rounded-full bg-white" />
+            <span className="block w-5 h-[2.5px] rounded-full bg-white" />
+          </button>
+        </div>
       </header>
 
       <div className="px-4 -mt-6 space-y-3">
-        {/* class select + date */}
+        {/* class select + function dropdown */}
         <div className="card p-3 grid grid-cols-2 gap-2">
           <select id="class-select" className="input" value={classId} onChange={(e) => setClassId(e.target.value)}>
             <option value="all">كل الفصول</option>
             {classes.map((cl) => <option key={cl.id} value={cl.id}>{cl.name}</option>)}
           </select>
-          <input id="date-input" type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
+          <select id="func-select" className="input" value={func} onChange={(e) => setFunc(e.target.value as Func)}>
+            {funcs.map((f) => (
+              <option key={f.key} value={f.key}>{f.icon} {f.label}</option>
+            ))}
+          </select>
         </div>
 
-        {/* function selector */}
-        <div className="card p-3">
-          <p className="text-[11px] font-extrabold text-gray-400 mb-2">اختر الوظيفة — سيظهر زرها بجوار كل طفل</p>
-          <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
-            {funcs.map((f) => (
-              <button key={f.key} onClick={() => setFunc(f.key)}
-                className={`chip ${func === f.key ? 'chip-on' : 'chip-off'}`}>
-                {f.icon} {f.label}
-              </button>
-            ))}
-          </div>
-          {(func === 'attendance' || func === 'addPoints' || func === 'subPoints') && (
-            <div className="flex items-center gap-2 mt-2 animate-fadeIn">
+        {/* points field for relevant functions */}
+        {(func === 'attendance' || func === 'addPoints' || func === 'subPoints') && (
+          <div className="card p-3 animate-fadeIn">
+            <div className="flex items-center gap-2">
               <label htmlFor="func-points" className="text-xs font-bold text-gray-500 shrink-0">النقاط:</label>
               <input id="func-points" type="number" min="0" className="input !py-2 w-24 text-center" dir="ltr"
                 value={points} onChange={(e) => setPoints(e.target.value)} />
               {func === 'attendance' && <span className="text-[11px] text-gray-400 font-semibold">تُضاف مع كل تسجيل حضور</span>}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
         <input id="children-search" value={search} onChange={(e) => setSearch(e.target.value)}
           placeholder="🔍 بحث بالاسم أو الهاتف أو الكود..." className="input" />
@@ -197,30 +238,43 @@ export default function ChildrenPage() {
             <p className="text-gray-400 font-bold">لا يوجد أطفال</p>
           </div>
         ) : (
-          <ul className="space-y-2 pb-4">
-            {filtered.map((c) => (
-              <li key={c.id}>
-                <div onClick={() => setSelected(c)}
-                  className="card p-3 flex items-center gap-3 cursor-pointer active:scale-[.99] transition">
-                  <div className="relative shrink-0">
-                    <div className="w-12 h-12 rounded-2xl bg-violet-100 overflow-hidden flex items-center justify-center text-2xl">
-                      {c.photo_url ? <img src={c.photo_url} alt={c.name} className="w-full h-full object-cover" /> : (c.gender === 'male' ? '👦' : '👧')}
-                    </div>
-                    {presentIds.has(c.id) && (
-                      <span className="absolute -bottom-0.5 -left-0.5 w-4 h-4 rounded-full bg-emerald-500 border-2 border-white" title="حاضر" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-bold text-gray-800 truncate">{c.name}</p>
-                    <p className="text-[11px] text-gray-400 font-semibold">{c.classes?.name || 'بدون فصل'} · ⭐ {c.total_points}</p>
-                  </div>
-                  {funcBtn(c)}
+          <div className="space-y-4 pb-4">
+            {groups.map((g) => (
+              <section key={g.id}>
+                <div className="flex items-center gap-2 mb-2 px-1">
+                  <h2 className="text-sm font-extrabold text-violet-700">🏫 {g.name}</h2>
+                  <span className="text-[10px] font-bold text-violet-400 bg-violet-50 rounded-full px-2 py-0.5">{g.kids.length}</span>
+                  <div className="flex-1 h-px bg-violet-100" />
                 </div>
-              </li>
+                <ul className="space-y-2">
+                  {g.kids.map((c) => (
+                    <li key={c.id}>
+                      <div onClick={() => setSelected(c)}
+                        className="card p-3 flex items-center gap-3 cursor-pointer active:scale-[.99] transition">
+                        <div className="relative shrink-0">
+                          <div className="w-12 h-12 rounded-2xl bg-violet-100 overflow-hidden flex items-center justify-center text-2xl">
+                            {c.photo_url ? <img src={c.photo_url} alt={c.name} className="w-full h-full object-cover" /> : (c.gender === 'male' ? '👦' : '👧')}
+                          </div>
+                          {presentIds.has(c.id) && (
+                            <span className="absolute -bottom-0.5 -left-0.5 w-4 h-4 rounded-full bg-emerald-500 border-2 border-white" title="حاضر" />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-bold text-gray-800 truncate">{c.name}</p>
+                          <p className="text-[11px] text-gray-400 font-semibold">⭐ {c.total_points} · {c.code}</p>
+                        </div>
+                        {funcBtn(c)}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </section>
             ))}
-          </ul>
+          </div>
         )}
       </div>
+
+      <SideDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
 
       {/* QR scan modal for new child */}
       <Modal open={scanOpen} onClose={() => setScanOpen(false)} title="امسح كود QR للطفل الجديد">
