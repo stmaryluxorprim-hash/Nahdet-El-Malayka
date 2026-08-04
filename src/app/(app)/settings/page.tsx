@@ -2,28 +2,39 @@
 import { useState, useEffect, useCallback } from 'react'
 import { getSupabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
-import type { Profile, Role, ClassRow } from '@/lib/types'
+import { useRealtime } from '@/lib/useRealtime'
+import Modal from '@/components/Modal'
+import type { Profile, Role, ClassRow, Permission } from '@/lib/types'
 
 export default function SettingsPage() {
-  const { profile, isAdmin, hasPermission, signOut } = useAuth()
+  const { profile, user, isAdmin, hasPermission, signOut } = useAuth()
   const [tab, setTab] = useState<'users' | 'classes' | 'points' | 'about'>(isAdmin ? 'users' : 'about')
   const [users, setUsers] = useState<Profile[]>([])
   const [roles, setRoles] = useState<Role[]>([])
+  const [allPerms, setAllPerms] = useState<Permission[]>([])
   const [classes, setClasses] = useState<ClassRow[]>([])
   const [newClass, setNewClass] = useState('')
   const [attPts, setAttPts] = useState({ present: 10, late: 5, absent: 0 })
   const [msg, setMsg] = useState('')
 
+  // permissions modal state
+  const [permUser, setPermUser] = useState<Profile | null>(null)
+  const [rolePermIds, setRolePermIds] = useState<Set<number>>(new Set())
+  const [userPermIds, setUserPermIds] = useState<Set<number>>(new Set())
+  const [permBusy, setPermBusy] = useState(false)
+
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 2500) }
 
   const loadUsers = useCallback(async () => {
     const supabase = getSupabase()
-    const [{ data: u }, { data: r }] = await Promise.all([
+    const [{ data: u }, { data: r }, { data: p }] = await Promise.all([
       supabase.from('profiles').select('*, roles(*)').order('created_at', { ascending: false }),
       supabase.from('roles').select('*'),
+      supabase.from('permissions').select('*').order('id'),
     ])
     setUsers((u as Profile[]) || [])
     setRoles((r as Role[]) || [])
+    setAllPerms((p as Permission[]) || [])
   }, [])
 
   const loadClasses = useCallback(async () => {
@@ -31,12 +42,18 @@ export default function SettingsPage() {
     setClasses((data as ClassRow[]) || [])
   }, [])
 
-  useEffect(() => {
+  const loadAll = useCallback(() => {
     if (isAdmin) loadUsers()
     loadClasses()
+  }, [isAdmin, loadUsers, loadClasses])
+
+  useEffect(() => {
+    loadAll()
     getSupabase().from('app_settings').select('value').eq('key', 'attendance_points').single()
       .then(({ data }) => { if (data?.value) setAttPts(data.value) })
-  }, [isAdmin, loadUsers, loadClasses])
+  }, [loadAll])
+
+  useRealtime(['profiles', 'classes', 'user_permissions'], loadAll)
 
   const updateUser = async (id: string, patch: Partial<Profile>) => {
     const { error } = await getSupabase().from('profiles').update(patch).eq('id', id)
@@ -44,6 +61,65 @@ export default function SettingsPage() {
     else { flash('✅ تم الحفظ'); loadUsers() }
   }
 
+  const approveUser = async (u: Profile) => {
+    const servant = roles.find((r) => r.key === 'servant')
+    await updateUser(u.id, { status: 'approved', role_id: u.role_id ?? servant?.id ?? null } as Partial<Profile>)
+  }
+
+  // ---- permissions modal ----
+  const openPerms = async (u: Profile) => {
+    setPermUser(u)
+    const supabase = getSupabase()
+    const [rp, up] = await Promise.all([
+      u.role_id
+        ? supabase.from('role_permissions').select('permission_id').eq('role_id', u.role_id)
+        : Promise.resolve({ data: [] as any[] }),
+      supabase.from('user_permissions').select('permission_id').eq('user_id', u.id),
+    ])
+    setRolePermIds(new Set(((rp.data as any[]) || []).map((r) => r.permission_id)))
+    setUserPermIds(new Set(((up.data as any[]) || []).map((r) => r.permission_id)))
+  }
+
+  const toggleUserPerm = async (permId: number) => {
+    if (!permUser) return
+    setPermBusy(true)
+    const supabase = getSupabase()
+    if (userPermIds.has(permId)) {
+      const { error } = await supabase.from('user_permissions')
+        .delete().eq('user_id', permUser.id).eq('permission_id', permId)
+      if (!error) setUserPermIds((s) => { const n = new Set(s); n.delete(permId); return n })
+    } else {
+      const { error } = await supabase.from('user_permissions')
+        .insert({ user_id: permUser.id, permission_id: permId, granted_by: user?.id })
+      if (!error) setUserPermIds((s) => new Set(s).add(permId))
+    }
+    setPermBusy(false)
+  }
+
+  const grantAll = async () => {
+    if (!permUser) return
+    setPermBusy(true)
+    const missing = allPerms
+      .filter((p) => !rolePermIds.has(p.id) && !userPermIds.has(p.id))
+      .map((p) => ({ user_id: permUser.id, permission_id: p.id, granted_by: user?.id }))
+    if (missing.length) {
+      const { error } = await getSupabase().from('user_permissions').insert(missing)
+      if (!error) setUserPermIds((s) => {
+        const n = new Set(s); missing.forEach((m) => n.add(m.permission_id)); return n
+      })
+    }
+    setPermBusy(false)
+  }
+
+  const revokeAll = async () => {
+    if (!permUser) return
+    setPermBusy(true)
+    const { error } = await getSupabase().from('user_permissions').delete().eq('user_id', permUser.id)
+    if (!error) setUserPermIds(new Set())
+    setPermBusy(false)
+  }
+
+  // ---- classes / points ----
   const addClass = async () => {
     if (!newClass.trim()) return
     const { error } = await getSupabase().from('classes').insert({ name: newClass.trim(), sort_order: classes.length + 1 })
@@ -77,105 +153,173 @@ export default function SettingsPage() {
   ]
 
   return (
-    <div className="p-4">
-      <h1 className="text-2xl font-extrabold text-gray-800 mb-4">⚙️ الإعدادات</h1>
+    <div className="animate-fadeIn">
+      <header className="hero-gradient text-white px-5 pt-8 pb-12 rounded-b-[2.5rem]">
+        <h1 className="text-2xl font-extrabold">⚙️ الإعدادات</h1>
+        <p className="text-white/70 text-xs font-semibold mt-1">إدارة المستخدمين والصلاحيات والفصول ⚡</p>
+      </header>
 
-      <div className="flex gap-2 overflow-x-auto pb-2 mb-4">
-        {TABS.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className={`shrink-0 px-4 py-2 rounded-xl font-bold text-sm ${tab === t.key ? 'bg-violet-600 text-white' : 'bg-white text-gray-500 border border-gray-200'}`}>
-            {t.label}
-          </button>
-        ))}
+      <div className="px-4 -mt-6 space-y-3 pb-4">
+        {msg && <p className="card p-3 text-center text-sm font-bold text-violet-700 animate-pop">{msg}</p>}
+
+        <div className="flex gap-2 overflow-x-auto no-scrollbar">
+          {TABS.map((t) => (
+            <button key={t.key} onClick={() => setTab(t.key)}
+              className={`chip ${tab === t.key ? 'chip-on' : 'chip-off'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ===== users ===== */}
+        {tab === 'users' && isAdmin && (
+          <section id="users-section" className="space-y-2">
+            {users.map((u) => (
+              <div key={u.id} className="card p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-extrabold text-gray-800 truncate">{u.full_name}</p>
+                    <p className="text-[11px] text-gray-400 font-semibold" dir="ltr">@{u.username || '—'}</p>
+                  </div>
+                  <span className={`text-[10px] font-extrabold rounded-full px-2.5 py-1 shrink-0 ${statusBadge(u.status)}`}>
+                    {statusLabel(u.status)}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 mt-3">
+                  {u.status === 'pending' && (
+                    <>
+                      <button onClick={() => approveUser(u)}
+                        className="rounded-xl bg-emerald-500 text-white text-xs font-extrabold px-3 py-2 active:scale-95 transition">
+                        ✅ موافقة
+                      </button>
+                      <button onClick={() => updateUser(u.id, { status: 'rejected' } as Partial<Profile>)}
+                        className="rounded-xl bg-red-50 text-red-600 text-xs font-extrabold px-3 py-2 active:scale-95 transition">
+                        ❌ رفض
+                      </button>
+                    </>
+                  )}
+                  {u.status === 'approved' && u.id !== profile?.id && (
+                    <button onClick={() => updateUser(u.id, { status: 'rejected' } as Partial<Profile>)}
+                      className="rounded-xl bg-red-50 text-red-600 text-xs font-extrabold px-3 py-2 active:scale-95 transition">
+                      ⛔ إيقاف
+                    </button>
+                  )}
+                  {u.status === 'rejected' && (
+                    <button onClick={() => updateUser(u.id, { status: 'approved' } as Partial<Profile>)}
+                      className="rounded-xl bg-emerald-50 text-emerald-700 text-xs font-extrabold px-3 py-2 active:scale-95 transition">
+                      🔄 إعادة تفعيل
+                    </button>
+                  )}
+                  <select
+                    className="rounded-xl border-2 border-gray-100 bg-gray-50 text-xs font-bold px-2 py-2"
+                    value={u.role_id ?? ''}
+                    onChange={(e) => updateUser(u.id, { role_id: e.target.value ? Number(e.target.value) : null } as Partial<Profile>)}>
+                    <option value="">بدون دور</option>
+                    {roles.map((r) => <option key={r.id} value={r.id}>{r.name_ar}</option>)}
+                  </select>
+                  <button onClick={() => openPerms(u)}
+                    className="rounded-xl bg-violet-50 text-violet-700 text-xs font-extrabold px-3 py-2 active:scale-95 transition">
+                    🛡️ الصلاحيات
+                  </button>
+                </div>
+              </div>
+            ))}
+          </section>
+        )}
+
+        {/* ===== classes ===== */}
+        {tab === 'classes' && (
+          <section id="classes-section" className="space-y-2">
+            <div className="card p-3 flex gap-2">
+              <input className="input flex-1" placeholder="اسم الفصل الجديد"
+                value={newClass} onChange={(e) => setNewClass(e.target.value)} />
+              <button onClick={addClass} className="btn-primary px-5">إضافة</button>
+            </div>
+            <div className="card divide-y divide-gray-50">
+              {classes.map((c) => (
+                <div key={c.id} className="flex items-center justify-between p-3">
+                  <p className="font-bold text-sm text-gray-700">🏫 {c.name}</p>
+                  <button onClick={() => deleteClass(c.id)}
+                    className="text-red-500 text-xs font-extrabold bg-red-50 rounded-xl px-3 py-1.5 active:scale-95 transition">حذف</button>
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ===== points ===== */}
+        {tab === 'points' && (
+          <section id="points-section" className="card p-4 space-y-3">
+            <p className="font-extrabold text-gray-800">⭐ النقاط الافتراضية للحضور</p>
+            <div className="grid grid-cols-3 gap-2">
+              {(['present', 'late', 'absent'] as const).map((k) => (
+                <div key={k}>
+                  <label className="text-[11px] font-bold text-gray-500 block mb-1">
+                    {k === 'present' ? 'حاضر' : k === 'late' ? 'متأخر' : 'غائب'}
+                  </label>
+                  <input type="number" className="input text-center" dir="ltr" value={attPts[k]}
+                    onChange={(e) => setAttPts({ ...attPts, [k]: Number(e.target.value) })} />
+                </div>
+              ))}
+            </div>
+            <button onClick={savePoints} className="btn-primary w-full">حفظ</button>
+          </section>
+        )}
+
+        {/* ===== about ===== */}
+        {tab === 'about' && (
+          <section id="about-section" className="card p-5 text-center space-y-3">
+            <div className="text-5xl">😇</div>
+            <p className="font-extrabold text-gray-800 text-lg">{profile?.full_name}</p>
+            <p className="text-sm text-gray-400 font-semibold" dir="ltr">@{profile?.username || '—'}</p>
+            <p className="text-xs font-bold text-violet-600 bg-violet-50 rounded-full inline-block px-3 py-1">
+              {profile?.roles?.name_ar || 'بدون دور'}
+            </p>
+            <button onClick={signOut} className="btn-soft w-full !text-red-600 !bg-red-50">🚪 تسجيل الخروج</button>
+            <p className="text-[11px] text-gray-300 font-semibold">نهضة الملائكة · v2</p>
+          </section>
+        )}
       </div>
 
-      {msg && <p className="mb-3 text-center font-bold bg-white rounded-xl p-2.5 shadow-sm animate-fadeIn">{msg}</p>}
-
-      {tab === 'users' && isAdmin && (
-        <ul className="space-y-2">
-          {users.map(u => (
-            <li key={u.id} className="bg-white rounded-2xl p-4 shadow-sm">
-              <div className="flex items-center justify-between mb-2">
-                <div>
-                  <p className="font-bold text-gray-800">{u.full_name || 'بدون اسم'}</p>
-                  {u.phone && <p className="text-xs text-gray-400" dir="ltr">{u.phone}</p>}
-                </div>
-                <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${statusBadge(u.status)}`}>{statusLabel(u.status)}</span>
-              </div>
-              <div className="flex gap-2 flex-wrap">
-                {u.status === 'pending' && (
-                  <>
-                    <button onClick={() => updateUser(u.id, { status: 'approved', role_id: roles.find(r => r.key === 'servant')?.id })}
-                      className="px-3 py-1.5 rounded-lg bg-green-600 text-white text-sm font-bold">✓ موافقة</button>
-                    <button onClick={() => updateUser(u.id, { status: 'rejected' })}
-                      className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-sm font-bold">✗ رفض</button>
-                  </>
-                )}
-                {u.status === 'approved' && u.id !== profile?.id && (
-                  <>
-                    <select value={u.role_id ?? ''} onChange={e => updateUser(u.id, { role_id: Number(e.target.value) })}
-                      className="border border-gray-200 rounded-lg px-2 py-1.5 text-sm font-bold bg-white">
-                      <option value="">بدون دور</option>
-                      {roles.map(r => <option key={r.id} value={r.id}>{r.name_ar}</option>)}
-                    </select>
-                    <button onClick={() => updateUser(u.id, { status: 'rejected' })}
-                      className="px-3 py-1.5 rounded-lg bg-red-50 text-red-600 text-sm font-bold">تعطيل</button>
-                  </>
-                )}
-                {u.status === 'rejected' && (
-                  <button onClick={() => updateUser(u.id, { status: 'approved' })}
-                    className="px-3 py-1.5 rounded-lg bg-green-50 text-green-600 text-sm font-bold">إعادة تفعيل</button>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {tab === 'classes' && (
+      {/* ===== per-user permissions modal ===== */}
+      <Modal open={!!permUser} onClose={() => setPermUser(null)} title={`🛡️ صلاحيات: ${permUser?.full_name || ''}`}>
         <div className="space-y-3">
           <div className="flex gap-2">
-            <input value={newClass} onChange={e => setNewClass(e.target.value)} placeholder="اسم الفصل الجديد"
-              className="flex-1 border border-gray-200 bg-white rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-violet-500" />
-            <button onClick={addClass} className="px-4 rounded-xl bg-violet-600 text-white font-bold">إضافة</button>
+            <button onClick={grantAll} disabled={permBusy}
+              className="flex-1 rounded-xl bg-emerald-500 text-white text-xs font-extrabold py-2.5 active:scale-95 transition disabled:opacity-50">
+              ✅ منح كل الصلاحيات
+            </button>
+            <button onClick={revokeAll} disabled={permBusy}
+              className="flex-1 rounded-xl bg-red-50 text-red-600 text-xs font-extrabold py-2.5 active:scale-95 transition disabled:opacity-50">
+              🗑️ إزالة الإضافية
+            </button>
           </div>
-          <ul className="space-y-2">
-            {classes.map(c => (
-              <li key={c.id} className="bg-white rounded-xl px-4 py-3 flex justify-between items-center shadow-sm">
-                <span className="font-bold text-gray-700">{c.name}</span>
-                <button onClick={() => deleteClass(c.id)} className="text-red-400 text-sm font-bold">حذف</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {tab === 'points' && (
-        <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
-          <h2 className="font-bold text-gray-700">نقاط الحضور التلقائية</h2>
-          {([['present', '✅ حاضر'], ['late', '◐ متأخر'], ['absent', '✗ غائب']] as const).map(([k, label]) => (
-            <div key={k} className="flex items-center justify-between">
-              <span className="font-bold text-gray-600">{label}</span>
-              <input type="number" inputMode="numeric" value={attPts[k]}
-                onChange={e => setAttPts(p => ({ ...p, [k]: Number(e.target.value) || 0 }))}
-                className="w-24 border border-gray-200 rounded-xl px-3 py-2 font-bold text-center outline-none focus:ring-2 focus:ring-violet-500" />
-            </div>
-          ))}
-          <button onClick={savePoints} className="w-full py-3 rounded-xl bg-violet-600 text-white font-bold">حفظ</button>
-        </div>
-      )}
-
-      {tab === 'about' && (
-        <div className="bg-white rounded-2xl p-5 shadow-sm space-y-4">
-          <div className="text-center">
-            <p className="text-4xl mb-2">🙋</p>
-            <p className="font-extrabold text-gray-800 text-lg">{profile?.full_name}</p>
-            <p className="text-sm text-gray-400">{profile?.roles?.name_ar || 'بدون دور'}</p>
+          <div className="space-y-1.5 max-h-72 overflow-y-auto">
+            {allPerms.map((p) => {
+              const fromRole = rolePermIds.has(p.id)
+              const extra = userPermIds.has(p.id)
+              return (
+                <label key={p.id}
+                  className={`flex items-center gap-3 rounded-xl px-3 py-2.5 border-2 ${
+                    fromRole ? 'bg-gray-50 border-gray-100 opacity-60' : extra ? 'bg-violet-50 border-violet-200' : 'bg-white border-gray-100'
+                  }`}>
+                  <input type="checkbox" className="w-4 h-4 accent-violet-600"
+                    checked={fromRole || extra}
+                    disabled={fromRole || permBusy}
+                    onChange={() => toggleUserPerm(p.id)} />
+                  <span className="flex-1 text-sm font-bold text-gray-700">{p.name_ar}</span>
+                  {fromRole && <span className="text-[10px] font-extrabold text-gray-400">من الدور</span>}
+                  {!fromRole && extra && <span className="text-[10px] font-extrabold text-violet-600">إضافية</span>}
+                </label>
+              )
+            })}
           </div>
-          <button onClick={signOut} className="w-full py-3 rounded-xl bg-red-50 text-red-600 font-bold">تسجيل الخروج</button>
-          <p className="text-center text-xs text-gray-300 font-bold">نهضة الملائكة · v1.0</p>
+          <p className="text-[11px] text-gray-400 font-semibold text-center">
+            الصلاحيات «من الدور» تُدار عبر تغيير الدور · «الإضافية» تُمنح لهذا المستخدم فقط
+          </p>
         </div>
-      )}
+      </Modal>
     </div>
   )
 }
