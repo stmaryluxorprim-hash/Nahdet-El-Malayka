@@ -21,6 +21,9 @@ export default function PrintCardsPage() {
   const [pad, setPad] = useState(3) // عدد الخانات (تعبئة بالأصفار)
   const [title, setTitle] = useState('نهضة الملايكة 2026')
   const [iconUrl, setIconUrl] = useState<string>('') // أيقونة يحددها المستخدم (data URL)
+  const [gapX, setGapX] = useState(4)   // المسافة الأفقية بين الكروت (مم)
+  const [gapY, setGapY] = useState(4)   // المسافة الرأسية بين الكروت (مم)
+  const [cardBg, setCardBg] = useState('#ffffff') // لون خلفية الكارت
   const [cards, setCards] = useState<CardData[]>([])
   const [qrMap, setQrMap] = useState<Record<string, string>>({}) // code -> dataURL
   const [busy, setBusy] = useState(false)
@@ -88,7 +91,7 @@ export default function PrintCardsPage() {
         <div>
           <h2 className="text-lg font-extrabold text-gray-800">إعدادات الكروت</h2>
           <p className="text-xs text-gray-400 font-semibold mt-0.5">
-            حدّد البادئة ونطاق الأرقام لتوليد صفحات A4 بكل منها 10 كروت جاهزة للطباعة
+            كل كارت نصفان متطابقان (كارت الأهل + كارت الطفل) يُقصّان رأسياً — صفحة A4 بها 10 كروت (2×5)
           </p>
         </div>
 
@@ -116,8 +119,24 @@ export default function PrintCardsPage() {
             </div>
           </div>
           <div className="col-span-2">
-            <label className="block text-xs font-bold text-gray-500 mb-1.5">النص أسفل الكارت</label>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">الاسم أعلى الكارت</label>
             <input className="input text-center font-extrabold" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">المسافة الأفقية بين الكروت (مم)</label>
+            <input className="input" type="number" min={0} max={20} step={0.5} value={gapX} onChange={(e) => setGapX(Math.max(0, Math.min(20, Number(e.target.value))))} />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">المسافة الرأسية بين الكروت (مم)</label>
+            <input className="input" type="number" min={0} max={20} step={0.5} value={gapY} onChange={(e) => setGapY(Math.max(0, Math.min(20, Number(e.target.value))))} />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">لون خلفية الكارت</label>
+            <div className="flex items-center gap-3">
+              <input type="color" value={cardBg} onChange={(e) => setCardBg(e.target.value)} className="w-12 h-10 rounded-xl border border-violet-100 cursor-pointer bg-white p-1" />
+              <input className="input flex-1" dir="ltr" value={cardBg} onChange={(e) => setCardBg(e.target.value)} placeholder="#ffffff" />
+              <button onClick={() => setCardBg('#ffffff')} className="text-xs font-bold text-gray-400">إعادة</button>
+            </div>
           </div>
           <div className="col-span-2">
             <label className="block text-xs font-bold text-gray-500 mb-1.5">الأيقونة (شعار الكارت)</label>
@@ -162,28 +181,44 @@ export default function PrintCardsPage() {
         <div id="print-area" className="space-y-6">
           {pages.map((page, pi) => (
             <div key={pi} className="print-page bg-white mx-auto shadow-lg no-print:shadow-lg">
-              <div className="cards-grid">
+              <div
+                className="cards-grid"
+                style={{ columnGap: `${gapX}mm`, rowGap: `${gapY}mm` }}
+              >
                 {page.map((c) => (
-                  <div key={c.code} className="print-card">
-                    {/* رأس الكارت: الأيقونة + العنوان */}
-                    <div className="card-head">
-                      {iconUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={iconUrl} alt="" className="card-icon" />
-                      ) : null}
-                      <span className="card-title">{title}</span>
-                    </div>
-
-                    {/* رمزا QR (نفس الكود مرتين) */}
-                    <div className="qr-row">
+                  <div key={c.code} className="print-card" style={{ background: cardBg }}>
+                    {/* النصف الأول: كارت الأهل */}
+                    <div className="card-half">
+                      <div className="card-head">
+                        {iconUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={iconUrl} alt="" className="card-icon" />
+                        ) : null}
+                        <span className="card-title">{title}</span>
+                      </div>
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={qrMap[c.code]} alt={c.code} className="qr-img" />
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={qrMap[c.code]} alt={c.code} className="qr-img" />
+                      <div className="card-code" dir="ltr">{c.code}</div>
+                      <div className="half-label">كارت الأهل</div>
                     </div>
 
-                    {/* الكود مكتوباً */}
-                    <div className="card-code" dir="ltr">{c.code}</div>
+                    {/* خط القص الرأسي */}
+                    <div className="cut-line" aria-hidden="true">✂</div>
+
+                    {/* النصف الثاني: كارت الطفل */}
+                    <div className="card-half">
+                      <div className="card-head">
+                        {iconUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img src={iconUrl} alt="" className="card-icon" />
+                        ) : null}
+                        <span className="card-title">{title}</span>
+                      </div>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={qrMap[c.code]} alt={c.code} className="qr-img" />
+                      <div className="card-code" dir="ltr">{c.code}</div>
+                      <div className="half-label">كارت الطفل</div>
+                    </div>
                   </div>
                 ))}
               </div>
