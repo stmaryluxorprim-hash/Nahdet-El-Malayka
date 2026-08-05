@@ -75,3 +75,98 @@ body {
 /* hide scrollbars for chip rows */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* ============ طباعة كروت — Print Cards ============ */
+
+/* صفحة A4: 210×297مم بهوامش داخلية */
+.print-page {
+  width: 210mm;
+  min-height: 297mm;
+  padding: 10mm 8mm;
+  box-sizing: border-box;
+}
+
+/* شبكة 2×5 = 10 كروت في الصفحة */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-template-rows: repeat(5, 1fr);
+  gap: 4mm;
+  height: 277mm; /* 297 - هوامش علوية/سفلية */
+}
+
+/* الكارت الواحد */
+.print-card {
+  border: 1.5px dashed #c4b5fd;
+  border-radius: 4mm;
+  padding: 3mm 3mm;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  background: #ffffff;
+  overflow: hidden;
+}
+
+.print-card .card-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2mm;
+  width: 100%;
+}
+.print-card .card-icon {
+  width: 9mm;
+  height: 9mm;
+  object-fit: contain;
+}
+.print-card .card-title {
+  font-family: 'Cairo', sans-serif;
+  font-weight: 800;
+  font-size: 3.6mm;
+  color: #6d28d9;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.print-card .qr-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3mm;
+  flex: 1;
+  width: 100%;
+}
+.print-card .qr-img {
+  width: 22mm;
+  height: 22mm;
+  image-rendering: pixelated;
+}
+
+.print-card .card-code {
+  font-family: 'Cairo', sans-serif;
+  font-weight: 800;
+  font-size: 3.8mm;
+  letter-spacing: 0.5px;
+  color: #1e1b4b;
+  text-align: center;
+}
+
+/* عناصر لا تظهر عند الطباعة */
+@media print {
+  .no-print { display: none !important; }
+  #app-header, #bottom-nav { display: none !important; }
+  body { background: #fff !important; }
+
+  @page { size: A4; margin: 0; }
+
+  #print-area { margin: 0 !important; }
+  .print-page {
+    box-shadow: none !important;
+    margin: 0 auto !important;
+    page-break-after: always;
+    break-after: page;
+  }
+  .print-page:last-child { page-break-after: auto; break-after: auto; }
+  .print-card { border-color: #d1d5db; }
+}

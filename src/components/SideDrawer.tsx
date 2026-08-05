@@ -1,31 +1,39 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import Icon, { IconName } from '@/components/Icon'
 
-const MAIN_TABS = [
-  { href: '/home', label: 'الرئيسية', icon: '🏠' },
-  { href: '/children', label: 'الأطفال', icon: '👼' },
-  { href: '/scanner', label: 'الماسح', icon: '📷' },
-  { href: '/statistics', label: 'الإحصائيات', icon: '📊' },
-  { href: '/settings', label: 'الإعدادات', icon: '⚙️' },
+type NavItem = { href: string; label: string; icon: IconName }
+
+const MAIN_TABS: NavItem[] = [
+  { href: '/home', label: 'الرئيسية', icon: 'home' },
+  { href: '/children', label: 'الأطفال', icon: 'children' },
+  { href: '/scanner', label: 'الماسح', icon: 'scanner' },
+  { href: '/statistics', label: 'الإحصائيات', icon: 'stats' },
+  { href: '/settings', label: 'الإعدادات', icon: 'settings' },
 ]
 
 // 👇 الصفحات الإضافية — أضِف هنا أي صفحة/موديول جديد لاحقاً
-const EXTRA_PAGES: { href: string; label: string; icon: string }[] = [
-  { href: '/schedule', label: 'تنظيم اليوم', icon: '🗓️' },
+const EXTRA_PAGES: NavItem[] = [
+  { href: '/schedule', label: 'تنظيم اليوم', icon: 'schedule' },
+  { href: '/print-cards', label: 'طباعة كروت', icon: 'print' },
 ]
 
 export default function SideDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {
   const pathname = usePathname()
 
-  const item = (t: { href: string; label: string; icon: string }) => {
+  const item = (t: NavItem) => {
     const active = pathname.startsWith(t.href)
     return (
       <Link key={t.href} href={t.href} onClick={onClose}
         className={`flex items-center gap-3 rounded-2xl px-4 py-3 font-extrabold text-sm transition-all ${
           active ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/30' : 'text-gray-600 active:bg-violet-50'
         }`}>
-        <span className="text-xl leading-none">{t.icon}</span>
+        <span className={`flex items-center justify-center w-9 h-9 rounded-xl shrink-0 ${
+          active ? 'bg-white/20' : 'bg-violet-50 text-violet-600'
+        }`}>
+          <Icon name={t.icon} size={20} />
+        </span>
         {t.label}
       </Link>
     )
@@ -42,8 +50,15 @@ export default function SideDrawer({ open, onClose }: { open: boolean; onClose: 
           open ? 'translate-x-0' : 'translate-x-full'
         }`}>
         <div className="hero-gradient text-white px-5 pt-8 pb-6 rounded-bl-3xl">
-          <p className="text-2xl font-extrabold">😇 نهضة الملائكة</p>
-          <p className="text-white/70 text-xs font-semibold mt-1">القائمة الرئيسية</p>
+          <div className="flex items-center gap-3">
+            <span className="flex items-center justify-center w-12 h-12 rounded-2xl bg-white/20 backdrop-blur">
+              <Icon name="angel" size={28} />
+            </span>
+            <div>
+              <p className="text-xl font-extrabold leading-tight">نهضة الملائكة</p>
+              <p className="text-white/70 text-xs font-semibold mt-0.5">القائمة الرئيسية</p>
+            </div>
+          </div>
         </div>
         <nav className="flex-1 overflow-y-auto p-3 space-y-1">
           {MAIN_TABS.map(item)}
