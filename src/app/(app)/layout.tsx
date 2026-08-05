@@ -5,13 +5,14 @@ import Link from 'next/link'
 import { useAuth } from '@/contexts/AuthContext'
 import { UiProvider } from '@/contexts/UiContext'
 import AppHeader from '@/components/AppHeader'
+import Icon, { IconName } from '@/components/Icon'
 
-const NAV = [
-  { href: '/home', label: 'الرئيسية', icon: '🏠' },
-  { href: '/children', label: 'الأطفال', icon: '👼' },
-  { href: '/scanner', label: 'الماسح', icon: '📷' },
-  { href: '/statistics', label: 'الإحصائيات', icon: '📊' },
-  { href: '/settings', label: 'الإعدادات', icon: '⚙️' },
+const NAV: { href: string; label: string; icon: IconName }[] = [
+  { href: '/home', label: 'الرئيسية', icon: 'home' },
+  { href: '/children', label: 'الأطفال', icon: 'children' },
+  { href: '/scanner', label: 'الماسح', icon: 'scanner' },
+  { href: '/statistics', label: 'الإحصائيات', icon: 'stats' },
+  { href: '/settings', label: 'الإعدادات', icon: 'settings' },
 ]
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
@@ -47,7 +48,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                   className={`flex flex-col items-center gap-0.5 rounded-2xl px-3 py-1.5 text-[10px] font-bold transition-all ${
                     active ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/30 scale-105' : 'text-gray-400'
                   }`}>
-                  <span className="text-lg leading-none">{item.icon}</span>
+                  <Icon name={item.icon} size={22} strokeWidth={active ? 2.1 : 1.8} />
                   {item.label}
                 </Link>
               )
