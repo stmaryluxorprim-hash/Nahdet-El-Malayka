@@ -314,7 +314,7 @@ export default function PrintCardsPage() {
   )
 
   return (
-    <div className="p-4 space-y-4">
+    <div className="p-4 space-y-4 print-root">
       {/* ===== البروفايلات (لا تُطبع) ===== */}
       <div className="card p-5 space-y-3 no-print">
         <div>
