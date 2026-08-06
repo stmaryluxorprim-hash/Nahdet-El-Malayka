@@ -6,8 +6,9 @@ import { getSupabase } from '@/lib/supabase'
 // كارت واحد
 type CardData = { code: string }
 
-// كل صفحة A4 تحتوي على 10 كروت (شبكة 2×5)
-const CARDS_PER_PAGE = 10
+// المساحة المتاحة داخل صفحة A4 بعد الهوامش (210-8*2) × (297-10*2)
+const PAGE_W = 194
+const PAGE_H = 277
 
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = []
@@ -23,7 +24,13 @@ type CardSettings = {
   iconUrl: string
   gapX: number
   gapY: number
+  cardW: number        // عرض الكارت (مم)
+  cardH: number        // ارتفاع الكارت (مم)
   cardBg: string
+  // تدرج خلفية الكارت
+  bgMode: 'solid' | 'gradient'
+  cardBgTo: string
+  bgAngle: number      // زاوية التدرج (درجات)
   // تدرج الهيدر
   headerFrom: string
   headerTo: string
@@ -49,7 +56,12 @@ const DEFAULT_SETTINGS: CardSettings = {
   iconUrl: '',
   gapX: 4,
   gapY: 4,
+  cardW: 95,
+  cardH: 52,
   cardBg: '#ffffff',
+  bgMode: 'solid',
+  cardBgTo: '#f5f3ff',
+  bgAngle: 135,
   headerFrom: '#7c3aed',
   headerTo: '#a855f7',
   headerTextColor: '#ffffff',
@@ -260,10 +272,22 @@ export default function PrintCardsPage() {
     } finally { setRecording(false) }
   }
 
-  const pages = useMemo(() => chunk(cards, CARDS_PER_PAGE), [cards])
+  // حساب عدد الأعمدة/الصفوف حسب أبعاد الكارت والمسافات
+  const layout = useMemo(() => {
+    const cw = Math.max(30, Math.min(PAGE_W, s.cardW))
+    const ch = Math.max(20, Math.min(PAGE_H, s.cardH))
+    const cols = Math.max(1, Math.floor((PAGE_W + s.gapX) / (cw + s.gapX)))
+    const rows = Math.max(1, Math.floor((PAGE_H + s.gapY) / (ch + s.gapY)))
+    return { cw, ch, cols, rows, perPage: cols * rows }
+  }, [s.cardW, s.cardH, s.gapX, s.gapY])
+
+  const pages = useMemo(() => chunk(cards, layout.perPage), [cards, layout.perPage])
 
   const headerGrad = `linear-gradient(90deg, ${s.headerFrom}, ${s.headerTo})`
   const footerGrad = `linear-gradient(90deg, ${s.footerFrom}, ${s.footerTo})`
+  const cardBgCss = s.bgMode === 'gradient'
+    ? `linear-gradient(${s.bgAngle}deg, ${s.cardBg}, ${s.cardBgTo})`
+    : s.cardBg
   const cardBorder = `${s.borderWidth}px ${s.borderStyle} ${s.borderColor}`
   const lastForCurrent = counterFor(prefix)
 
@@ -349,7 +373,7 @@ export default function PrintCardsPage() {
         <div>
           <h2 className="text-lg font-extrabold text-gray-800">إعدادات الكروت</h2>
           <p className="text-xs text-gray-400 font-semibold mt-0.5">
-            كل كارت نصفان متطابقان (كارت ولي الأمر + كارت الطفل) يُقصّان رأسياً — صفحة A4 بها 10 كروت (2×5)
+            كل كارت نصفان متطابقان (كارت ولي الأمر + كارت الطفل) يُقصّان رأسياً — التوزيع الحالي: {layout.cols}×{layout.rows} = {layout.perPage} كارت في صفحة A4
           </p>
         </div>
 
@@ -381,6 +405,15 @@ export default function PrintCardsPage() {
               {makeCode(Number(from) || 0)}
             </div>
           </div>
+          {/* ===== أبعاد الكارت ===== */}
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">عرض الكارت (مم)</label>
+            <input className="input" type="number" min={30} max={194} step={0.5} value={s.cardW} onChange={(e) => set('cardW', Math.max(30, Math.min(194, Number(e.target.value))))} />
+          </div>
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">ارتفاع الكارت (مم)</label>
+            <input className="input" type="number" min={20} max={277} step={0.5} value={s.cardH} onChange={(e) => set('cardH', Math.max(20, Math.min(277, Number(e.target.value))))} />
+          </div>
           <div>
             <label className="block text-xs font-bold text-gray-500 mb-1.5">المسافة الأفقية بين الكروت (مم)</label>
             <input className="input" type="number" min={0} max={20} step={0.5} value={s.gapX} onChange={(e) => set('gapX', Math.max(0, Math.min(20, Number(e.target.value))))} />
@@ -390,7 +423,39 @@ export default function PrintCardsPage() {
             <input className="input" type="number" min={0} max={20} step={0.5} value={s.gapY} onChange={(e) => set('gapY', Math.max(0, Math.min(20, Number(e.target.value))))} />
           </div>
 
-          <ColorField label="لون خلفية الكارت" value={s.cardBg} onChange={(v) => set('cardBg', v)} />
+          <div className="col-span-2">
+            <p className="text-[11px] font-bold text-violet-600 bg-violet-50 rounded-xl px-3 py-2">
+              📐 التوزيع: {layout.cols} عمود × {layout.rows} صف = <b>{layout.perPage}</b> كارت في الصفحة (مساحة A4 المتاحة: {PAGE_W}×{PAGE_H} مم)
+            </p>
+          </div>
+
+          {/* ===== خلفية الكارت ===== */}
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">نوع الخلفية</label>
+            <select className="input" value={s.bgMode} onChange={(e) => set('bgMode', e.target.value as 'solid' | 'gradient')}>
+              <option value="solid">لون واحد</option>
+              <option value="gradient">تدرج لونين</option>
+            </select>
+          </div>
+          <ColorField label={s.bgMode === 'gradient' ? 'خلفية الكارت — بداية التدرج' : 'لون خلفية الكارت'} value={s.cardBg} onChange={(v) => set('cardBg', v)} />
+          {s.bgMode === 'gradient' && (
+            <>
+              <ColorField label="خلفية الكارت — نهاية التدرج" value={s.cardBgTo} onChange={(v) => set('cardBgTo', v)} />
+              <div>
+                <label className="block text-xs font-bold text-gray-500 mb-1.5">زاوية التدرج: <span className="text-violet-600">{s.bgAngle}°</span></label>
+                <div className="flex items-center gap-2">
+                  <input type="range" min={0} max={360} step={5} value={s.bgAngle}
+                    onChange={(e) => set('bgAngle', Number(e.target.value))} className="flex-1 accent-violet-600" />
+                  <input className="input !w-20 text-center" type="number" min={0} max={360} value={s.bgAngle}
+                    onChange={(e) => set('bgAngle', Math.max(0, Math.min(360, Number(e.target.value))))} />
+                </div>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-bold text-gray-500 mb-1.5">معاينة خلفية الكارت</label>
+                <div className="rounded-xl h-10 border border-violet-100" style={{ background: cardBgCss }} />
+              </div>
+            </>
+          )}
 
           {/* ===== حواف الكارت ===== */}
           <div>
@@ -518,10 +583,15 @@ export default function PrintCardsPage() {
             <div key={pi} className="print-page bg-white mx-auto shadow-lg no-print:shadow-lg">
               <div
                 className="cards-grid"
-                style={{ columnGap: `${s.gapX}mm`, rowGap: `${s.gapY}mm` }}
+                style={{
+                  columnGap: `${s.gapX}mm`,
+                  rowGap: `${s.gapY}mm`,
+                  gridTemplateColumns: `repeat(${layout.cols}, ${layout.cw}mm)`,
+                  gridAutoRows: `${layout.ch}mm`,
+                }}
               >
                 {page.map((c) => (
-                  <div key={c.code} className="print-card" style={{ background: s.cardBg, border: cardBorder }}>
+                  <div key={c.code} className="print-card" style={{ background: cardBgCss, border: cardBorder }}>
                     {/* النصف الأول: كارت ولي الأمر (عرضه = موضع خط القص) */}
                     {half(c.code, 'كارت ولي الأمر', s.cutPos)}
 

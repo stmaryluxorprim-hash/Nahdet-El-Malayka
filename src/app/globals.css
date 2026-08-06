@@ -86,11 +86,12 @@ body {
   box-sizing: border-box;
 }
 
-/* شبكة 2×5 = 10 كروت في الصفحة (المسافات تُضبط inline من الصفحة) */
+/* شبكة الكروت — الأعمدة/الصفوف والأبعاد والمسافات تُضبط inline من الصفحة
+   الشبكة متوسطنة أفقياً ورأسياً داخل الصفحة */
 .cards-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  grid-template-rows: repeat(5, 1fr);
+  justify-content: center;   /* توسيط أفقي */
+  align-content: center;     /* توسيط رأسي */
   height: 277mm; /* 297 - هوامش علوية/سفلية */
 }
 
