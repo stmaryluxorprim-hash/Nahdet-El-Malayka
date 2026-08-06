@@ -17,6 +17,9 @@ export type IconName =
   | 'calendar'
   | 'menu'
   | 'angel'
+  | 'megaphone'
+  | 'expand'
+  | 'shrink'
 
 type Props = {
   name: IconName
@@ -101,6 +104,32 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M4 7h16" />
       <path d="M4 12h16" />
       <path d="M4 17h16" />
+    </>
+  ),
+  // استدعاء — مكبر صوت
+  megaphone: (
+    <>
+      <path d="M3 11v3a1 1 0 0 0 1 1h2l3.5 4a1 1 0 0 0 1.5-.9V6.9a1 1 0 0 0-1.5-.9L6 10H4a1 1 0 0 0-1 1Z" />
+      <path d="M14 9.5a4 4 0 0 1 0 5" />
+      <path d="M16.5 7a8 8 0 0 1 0 10" />
+    </>
+  ),
+  // ملء الشاشة — توسيع
+  expand: (
+    <>
+      <path d="M8 3H5a2 2 0 0 0-2 2v3" />
+      <path d="M16 3h3a2 2 0 0 1 2 2v3" />
+      <path d="M21 16v3a2 2 0 0 1-2 2h-3" />
+      <path d="M3 16v3a2 2 0 0 0 2 2h3" />
+    </>
+  ),
+  // خروج من ملء الشاشة — تصغير
+  shrink: (
+    <>
+      <path d="M8 3v3a2 2 0 0 1-2 2H3" />
+      <path d="M16 3v3a2 2 0 0 0 2 2h3" />
+      <path d="M21 16h-3a2 2 0 0 0-2 2v3" />
+      <path d="M3 16h3a2 2 0 0 1 2 2v3" />
     </>
   ),
   // ملاك — شعار التطبيق
