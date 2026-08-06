@@ -1,6 +1,7 @@
 'use client'
-import { useState, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import QRCode from 'qrcode'
+import { getSupabase } from '@/lib/supabase'
 
 // كارت واحد
 type CardData = { code: string }
@@ -14,20 +15,178 @@ function chunk<T>(arr: T[], size: number): T[][] {
   return out
 }
 
+// ===== إعدادات التصميم القابلة للحفظ في البروفايل =====
+type CardSettings = {
+  pad: number
+  title: string          // نص الهيدر (نفسه في النصفين)
+  footerTitle: string    // نص الفوتر (نفسه في النصفين)
+  iconUrl: string
+  gapX: number
+  gapY: number
+  cardBg: string
+  // تدرج الهيدر
+  headerFrom: string
+  headerTo: string
+  headerTextColor: string
+  headerHeight: number   // ارتفاع الهيدر (مم)
+  // تدرج الفوتر
+  footerFrom: string
+  footerTo: string
+  footerTextColor: string
+  footerHeight: number   // ارتفاع الفوتر (مم)
+  // حواف الكارت
+  borderWidth: number // بالنقاط (px)
+  borderColor: string
+  borderStyle: 'solid' | 'dashed'
+  // موضع خط القص: عرض النصف الأول (كارت ولي الأمر) كنسبة مئوية
+  cutPos: number
+}
+
+const DEFAULT_SETTINGS: CardSettings = {
+  pad: 3,
+  title: 'نهضة الملايكة 2026',
+  footerTitle: 'كنيسة العذراء مريم — الأقصر',
+  iconUrl: '',
+  gapX: 4,
+  gapY: 4,
+  cardBg: '#ffffff',
+  headerFrom: '#7c3aed',
+  headerTo: '#a855f7',
+  headerTextColor: '#ffffff',
+  headerHeight: 8,
+  footerFrom: '#a855f7',
+  footerTo: '#7c3aed',
+  footerTextColor: '#ffffff',
+  footerHeight: 6,
+  borderWidth: 1.5,
+  borderColor: '#7c3aed',
+  borderStyle: 'solid',
+  cutPos: 50,
+}
+
+type CardProfile = {
+  id: string
+  name: string
+  prefix: string
+  settings: Partial<CardSettings>
+}
+
+type PrintCounter = { prefix: string; last_printed_no: number; updated_at: string }
+
+// مكوّن مساعد: منتقي لون (منتقي + حقل نصي) — خارج الصفحة حتى لا يفقد الحقل التركيز
+function ColorField({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div>
+      <label className="block text-xs font-bold text-gray-500 mb-1.5">{label}</label>
+      <div className="flex items-center gap-2">
+        <input type="color" value={value} onChange={(e) => onChange(e.target.value)}
+          className="w-10 h-10 shrink-0 rounded-xl border border-violet-100 cursor-pointer bg-white p-1" />
+        <input className="input flex-1 min-w-0" dir="ltr" value={value} onChange={(e) => onChange(e.target.value)} />
+      </div>
+    </div>
+  )
+}
+
 export default function PrintCardsPage() {
   const [prefix, setPrefix] = useState('NM-')
   const [from, setFrom] = useState(1)
   const [to, setTo] = useState(20)
-  const [pad, setPad] = useState(3) // عدد الخانات (تعبئة بالأصفار)
-  const [title, setTitle] = useState('نهضة الملايكة 2026')
-  const [iconUrl, setIconUrl] = useState<string>('') // أيقونة يحددها المستخدم (data URL)
-  const [gapX, setGapX] = useState(4)   // المسافة الأفقية بين الكروت (مم)
-  const [gapY, setGapY] = useState(4)   // المسافة الرأسية بين الكروت (مم)
-  const [cardBg, setCardBg] = useState('#ffffff') // لون خلفية الكارت
+  const [s, setS] = useState<CardSettings>(DEFAULT_SETTINGS)
+  const set = <K extends keyof CardSettings>(k: K, v: CardSettings[K]) => setS((p) => ({ ...p, [k]: v }))
+
   const [cards, setCards] = useState<CardData[]>([])
   const [qrMap, setQrMap] = useState<Record<string, string>>({}) // code -> dataURL
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [msg, setMsg] = useState('')
+
+  // ===== البروفايلات والعدّادات =====
+  const [profiles, setProfiles] = useState<CardProfile[]>([])
+  const [selectedProfileId, setSelectedProfileId] = useState('')
+  const [profileName, setProfileName] = useState('')
+  const [counters, setCounters] = useState<PrintCounter[]>([])
+  const [savingProfile, setSavingProfile] = useState(false)
+  const [recording, setRecording] = useState(false)
+  const [printedRange, setPrintedRange] = useState<{ prefix: string; to: number } | null>(null)
+
+  const loadRemote = useCallback(async () => {
+    try {
+      const sb = getSupabase()
+      const [{ data: profs }, { data: cnts }] = await Promise.all([
+        sb.from('card_profiles').select('id, name, prefix, settings').order('name'),
+        sb.from('card_print_counters').select('prefix, last_printed_no, updated_at').order('prefix'),
+      ])
+      if (profs) setProfiles(profs as CardProfile[])
+      if (cnts) setCounters(cnts as PrintCounter[])
+    } catch {
+      /* بدون اتصال — نتجاهل */
+    }
+  }, [])
+
+  useEffect(() => { loadRemote() }, [loadRemote])
+
+  const counterFor = useCallback(
+    (p: string) => counters.find((c) => c.prefix === p.trim())?.last_printed_no ?? null,
+    [counters]
+  )
+
+  const applyProfile = (id: string) => {
+    setSelectedProfileId(id)
+    const p = profiles.find((x) => x.id === id)
+    if (!p) return
+    setPrefix(p.prefix)
+    setProfileName(p.name)
+    // توافق مع البروفايلات القديمة (headerText/footerText → headerTextColor/footerTextColor)
+    const legacy = (p.settings || {}) as any
+    const migrated: Partial<CardSettings> = { ...legacy }
+    if (legacy.headerText && !legacy.headerTextColor) migrated.headerTextColor = legacy.headerText
+    if (legacy.footerText && !legacy.footerTextColor) migrated.footerTextColor = legacy.footerText
+    setS({ ...DEFAULT_SETTINGS, ...migrated })
+    // اقتراح البداية بعد آخر رقم مطبوع لهذه البادئة
+    const last = counters.find((c) => c.prefix === p.prefix.trim())?.last_printed_no
+    if (last && last > 0) { setFrom(last + 1); setTo(last + 20) }
+    setMsg(`تم تحميل بروفايل «${p.name}»`)
+  }
+
+  const saveProfile = async (asNew: boolean) => {
+    setErr(''); setMsg('')
+    const name = profileName.trim()
+    if (!name) { setErr('اكتب اسماً للبروفايل'); return }
+    if (!prefix.trim()) { setErr('اكتب البادئة (Prefix) المرتبطة بالبروفايل'); return }
+    setSavingProfile(true)
+    try {
+      const sb = getSupabase()
+      const payload = { name, prefix: prefix.trim(), settings: s as any }
+      if (!asNew && selectedProfileId) {
+        const { error } = await sb.from('card_profiles')
+          .update({ ...payload, updated_at: new Date().toISOString() })
+          .eq('id', selectedProfileId)
+        if (error) throw error
+        setMsg(`تم تحديث بروفايل «${name}»`)
+      } else {
+        const { data, error } = await sb.from('card_profiles').insert(payload).select('id').single()
+        if (error) throw error
+        if (data?.id) setSelectedProfileId(data.id)
+        setMsg(`تم حفظ بروفايل «${name}»`)
+      }
+      await loadRemote()
+    } catch (e: any) {
+      setErr(e?.message?.includes('duplicate') ? 'يوجد بروفايل بنفس الاسم' : (e?.message || 'تعذّر حفظ البروفايل'))
+    } finally { setSavingProfile(false) }
+  }
+
+  const deleteProfile = async () => {
+    if (!selectedProfileId) return
+    if (!confirm('حذف هذا البروفايل نهائياً؟')) return
+    try {
+      const sb = getSupabase()
+      const { error } = await sb.from('card_profiles').delete().eq('id', selectedProfileId)
+      if (error) throw error
+      setSelectedProfileId(''); setProfileName('')
+      setMsg('تم حذف البروفايل')
+      await loadRemote()
+    } catch (e: any) { setErr(e?.message || 'تعذّر الحذف') }
+  }
 
   const totalRequested = useMemo(() => {
     const f = Number(from), t = Number(to)
@@ -36,22 +195,22 @@ export default function PrintCardsPage() {
   }, [from, to])
 
   const makeCode = useCallback((n: number) => {
-    const num = pad > 0 ? String(n).padStart(pad, '0') : String(n)
+    const num = s.pad > 0 ? String(n).padStart(s.pad, '0') : String(n)
     return `${prefix}${num}`
-  }, [prefix, pad])
+  }, [prefix, s.pad])
 
   // اختيار أيقونة من الجهاز → data URL
   const onPickIcon = (file: File | null) => {
     if (!file) return
     const reader = new FileReader()
-    reader.onload = () => setIconUrl(String(reader.result || ''))
+    reader.onload = () => set('iconUrl', String(reader.result || ''))
     reader.readAsDataURL(file)
   }
 
   const generate = async () => {
-    setErr('')
+    setErr(''); setMsg('')
     const f = Number(from), t = Number(to)
-    if (!prefix.trim() && pad === 0) { setErr('اكتب البادئة أو فعّل التعبئة بالأصفار'); return }
+    if (!prefix.trim() && s.pad === 0) { setErr('اكتب البادئة أو فعّل التعبئة بالأصفار'); return }
     if (!Number.isFinite(f) || !Number.isFinite(t)) { setErr('أدخل أرقاماً صحيحة للنطاق'); return }
     if (t < f) { setErr('نهاية النطاق يجب أن تكون أكبر من أو تساوي البداية'); return }
     if (t - f + 1 > 1000) { setErr('النطاق كبير جداً (الحد الأقصى 1000 كارت)'); return }
@@ -75,6 +234,7 @@ export default function PrintCardsPage() {
       )
       setQrMap(map)
       setCards(list)
+      setPrintedRange({ prefix: prefix.trim(), to: t })
     } catch (e: any) {
       setErr(e?.message || 'حدث خطأ أثناء التوليد')
     } finally {
@@ -82,16 +242,114 @@ export default function PrintCardsPage() {
     }
   }
 
+  // تسجيل «تمت الطباعة حتى رقم …» لهذه البادئة
+  const recordPrinted = async () => {
+    if (!printedRange) return
+    setRecording(true); setErr(''); setMsg('')
+    try {
+      const sb = getSupabase()
+      const { data, error } = await sb.rpc('record_cards_printed', {
+        p_prefix: printedRange.prefix,
+        p_last_no: printedRange.to,
+      })
+      if (error) throw error
+      setMsg(`✅ تم التسجيل: بادئة «${printedRange.prefix}» مطبوعة حتى رقم ${data ?? printedRange.to}`)
+      await loadRemote()
+    } catch (e: any) {
+      setErr(e?.message || 'تعذّر تسجيل الطباعة (تأكد من تنفيذ migration_v7)')
+    } finally { setRecording(false) }
+  }
+
   const pages = useMemo(() => chunk(cards, CARDS_PER_PAGE), [cards])
+
+  const headerGrad = `linear-gradient(90deg, ${s.headerFrom}, ${s.headerTo})`
+  const footerGrad = `linear-gradient(90deg, ${s.footerFrom}, ${s.footerTo})`
+  const cardBorder = `${s.borderWidth}px ${s.borderStyle} ${s.borderColor}`
+  const lastForCurrent = counterFor(prefix)
+
+  // نصف الكارت: هيدر متدرج → (pill أبيض للتسمية + QR أبيض + pill أبيض للكود) → فوتر متدرج
+  const half = (code: string, label: string, widthPct: number) => (
+    <div className="card-half" style={{ flexBasis: `${widthPct}%`, maxWidth: `${widthPct}%` }}>
+      <div className="half-header" style={{ background: headerGrad, color: s.headerTextColor, height: `${s.headerHeight}mm` }}>
+        {s.iconUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={s.iconUrl} alt="" className="card-icon" />
+        ) : null}
+        <span className="card-title" style={{ color: s.headerTextColor }}>{s.title}</span>
+      </div>
+      <div className="half-body">
+        <div className="card-pill">{label}</div>
+        <div className="qr-wrap">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={qrMap[code]} alt={code} className="qr-img" />
+        </div>
+        <div className="card-pill" dir="ltr">{code}</div>
+      </div>
+      <div className="half-footer" style={{ background: footerGrad, color: s.footerTextColor, height: `${s.footerHeight}mm` }}>{s.footerTitle}</div>
+    </div>
+  )
 
   return (
     <div className="p-4 space-y-4">
+      {/* ===== البروفايلات (لا تُطبع) ===== */}
+      <div className="card p-5 space-y-3 no-print">
+        <div>
+          <h2 className="text-lg font-extrabold text-gray-800">البروفايلات</h2>
+          <p className="text-xs text-gray-400 font-semibold mt-0.5">
+            احفظ إعدادات التصميم مع البادئة الخاصة بها، واسترجعها في أي وقت
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="col-span-2">
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">تحميل بروفايل</label>
+            <select className="input" value={selectedProfileId} onChange={(e) => applyProfile(e.target.value)}>
+              <option value="">— اختر بروفايل —</option>
+              {profiles.map((p) => (
+                <option key={p.id} value={p.id}>{p.name} ({p.prefix})</option>
+              ))}
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">اسم البروفايل</label>
+            <input className="input" value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="مثال: كروت ابتدائي 2026" />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={() => saveProfile(true)} disabled={savingProfile} className="btn-primary text-sm px-4">
+            {savingProfile ? '...' : '＋ حفظ كبروفايل جديد'}
+          </button>
+          {selectedProfileId && (
+            <>
+              <button onClick={() => saveProfile(false)} disabled={savingProfile} className="btn-soft text-sm px-4">💾 تحديث البروفايل</button>
+              <button onClick={deleteProfile} className="text-sm font-bold text-rose-500 px-3">🗑 حذف</button>
+            </>
+          )}
+        </div>
+
+        {/* عدّادات الطباعة لكل بادئة */}
+        {counters.length > 0 && (
+          <div className="pt-2 border-t border-violet-50">
+            <p className="text-xs font-extrabold text-gray-600 mb-2">📊 آخر رقم مطبوع لكل بادئة:</p>
+            <div className="flex flex-wrap gap-2">
+              {counters.map((c) => (
+                <button key={c.prefix}
+                  onClick={() => { setPrefix(c.prefix); setFrom(c.last_printed_no + 1); setTo(c.last_printed_no + 20) }}
+                  className="text-xs font-bold bg-violet-50 text-violet-700 rounded-xl px-3 py-2 hover:bg-violet-100"
+                  title="اضغط لبدء الترقيم بعد آخر رقم مطبوع">
+                  <span dir="ltr">{c.prefix}</span> → حتى رقم <b>{c.last_printed_no}</b>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+
       {/* ===== لوحة الإعدادات (لا تُطبع) ===== */}
       <div className="card p-5 space-y-4 no-print">
         <div>
           <h2 className="text-lg font-extrabold text-gray-800">إعدادات الكروت</h2>
           <p className="text-xs text-gray-400 font-semibold mt-0.5">
-            كل كارت نصفان متطابقان (كارت الأهل + كارت الطفل) يُقصّان رأسياً — صفحة A4 بها 10 كروت (2×5)
+            كل كارت نصفان متطابقان (كارت ولي الأمر + كارت الطفل) يُقصّان رأسياً — صفحة A4 بها 10 كروت (2×5)
           </p>
         </div>
 
@@ -99,6 +357,11 @@ export default function PrintCardsPage() {
           <div className="col-span-2">
             <label className="block text-xs font-bold text-gray-500 mb-1.5">البادئة (Prefix)</label>
             <input className="input" value={prefix} onChange={(e) => setPrefix(e.target.value)} placeholder="مثال: NM-" />
+            {lastForCurrent !== null && (
+              <p className="text-[11px] font-bold text-violet-600 mt-1">
+                آخر رقم مطبوع لهذه البادئة: {lastForCurrent} — الرقم التالي: {lastForCurrent + 1}
+              </p>
+            )}
           </div>
           <div>
             <label className="block text-xs font-bold text-gray-500 mb-1.5">من رقم</label>
@@ -110,7 +373,7 @@ export default function PrintCardsPage() {
           </div>
           <div>
             <label className="block text-xs font-bold text-gray-500 mb-1.5">خانات الرقم (أصفار)</label>
-            <input className="input" type="number" min={0} max={8} value={pad} onChange={(e) => setPad(Math.max(0, Math.min(8, Number(e.target.value))))} />
+            <input className="input" type="number" min={0} max={8} value={s.pad} onChange={(e) => set('pad', Math.max(0, Math.min(8, Number(e.target.value))))} />
           </div>
           <div>
             <label className="block text-xs font-bold text-gray-500 mb-1.5">مثال على الكود</label>
@@ -118,26 +381,89 @@ export default function PrintCardsPage() {
               {makeCode(Number(from) || 0)}
             </div>
           </div>
-          <div className="col-span-2">
-            <label className="block text-xs font-bold text-gray-500 mb-1.5">الاسم أعلى الكارت</label>
-            <input className="input text-center font-extrabold" value={title} onChange={(e) => setTitle(e.target.value)} />
-          </div>
           <div>
             <label className="block text-xs font-bold text-gray-500 mb-1.5">المسافة الأفقية بين الكروت (مم)</label>
-            <input className="input" type="number" min={0} max={20} step={0.5} value={gapX} onChange={(e) => setGapX(Math.max(0, Math.min(20, Number(e.target.value))))} />
+            <input className="input" type="number" min={0} max={20} step={0.5} value={s.gapX} onChange={(e) => set('gapX', Math.max(0, Math.min(20, Number(e.target.value))))} />
           </div>
           <div>
             <label className="block text-xs font-bold text-gray-500 mb-1.5">المسافة الرأسية بين الكروت (مم)</label>
-            <input className="input" type="number" min={0} max={20} step={0.5} value={gapY} onChange={(e) => setGapY(Math.max(0, Math.min(20, Number(e.target.value))))} />
+            <input className="input" type="number" min={0} max={20} step={0.5} value={s.gapY} onChange={(e) => set('gapY', Math.max(0, Math.min(20, Number(e.target.value))))} />
           </div>
+
+          <ColorField label="لون خلفية الكارت" value={s.cardBg} onChange={(v) => set('cardBg', v)} />
+
+          {/* ===== حواف الكارت ===== */}
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">سمك الحواف (px)</label>
+            <input className="input" type="number" min={0} max={10} step={0.5} value={s.borderWidth} onChange={(e) => set('borderWidth', Math.max(0, Math.min(10, Number(e.target.value))))} />
+          </div>
+          <ColorField label="لون الحواف" value={s.borderColor} onChange={(v) => set('borderColor', v)} />
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">نمط الحواف</label>
+            <select className="input" value={s.borderStyle} onChange={(e) => set('borderStyle', e.target.value as 'solid' | 'dashed')}>
+              <option value="solid">متصل</option>
+              <option value="dashed">متقطع</option>
+            </select>
+          </div>
+
+          {/* ===== موضع خط القص ===== */}
           <div className="col-span-2">
-            <label className="block text-xs font-bold text-gray-500 mb-1.5">لون خلفية الكارت</label>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">
+              موضع خط القص — عرض كارت ولي الأمر: <span className="text-violet-600">{s.cutPos}%</span> · كارت الطفل: <span className="text-violet-600">{100 - s.cutPos}%</span>
+            </label>
             <div className="flex items-center gap-3">
-              <input type="color" value={cardBg} onChange={(e) => setCardBg(e.target.value)} className="w-12 h-10 rounded-xl border border-violet-100 cursor-pointer bg-white p-1" />
-              <input className="input flex-1" dir="ltr" value={cardBg} onChange={(e) => setCardBg(e.target.value)} placeholder="#ffffff" />
-              <button onClick={() => setCardBg('#ffffff')} className="text-xs font-bold text-gray-400">إعادة</button>
+              <input type="range" min={20} max={80} step={1} value={s.cutPos}
+                onChange={(e) => set('cutPos', Number(e.target.value))} className="flex-1 accent-violet-600" />
+              <input className="input !w-20 text-center" type="number" min={20} max={80} value={s.cutPos}
+                onChange={(e) => set('cutPos', Math.max(20, Math.min(80, Number(e.target.value))))} />
+              <button onClick={() => set('cutPos', 50)} className="text-xs font-bold text-gray-400">منتصف</button>
             </div>
           </div>
+
+          {/* ===== الهيدر ===== */}
+          <div className="col-span-2 pt-1">
+            <p className="text-xs font-extrabold text-gray-600">🎨 الهيدر (أعلى الكارت)</p>
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">نص الهيدر (يظهر في النصفين)</label>
+            <input className="input text-center font-extrabold" value={s.title} onChange={(e) => set('title', e.target.value)} />
+          </div>
+          <ColorField label="بداية التدرج" value={s.headerFrom} onChange={(v) => set('headerFrom', v)} />
+          <ColorField label="نهاية التدرج" value={s.headerTo} onChange={(v) => set('headerTo', v)} />
+          <ColorField label="لون نص الهيدر" value={s.headerTextColor} onChange={(v) => set('headerTextColor', v)} />
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">ارتفاع الهيدر (مم)</label>
+            <input className="input" type="number" min={3} max={20} step={0.5} value={s.headerHeight}
+              onChange={(e) => set('headerHeight', Math.max(3, Math.min(20, Number(e.target.value))))} />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">معاينة الهيدر</label>
+            <div className="rounded-xl flex items-center justify-center text-xs font-extrabold"
+              style={{ background: headerGrad, color: s.headerTextColor, height: `${Math.max(24, s.headerHeight * 4)}px` }}>{s.title || 'العنوان'}</div>
+          </div>
+
+          {/* ===== الفوتر ===== */}
+          <div className="col-span-2 pt-1">
+            <p className="text-xs font-extrabold text-gray-600">🎨 الفوتر (أسفل الكارت)</p>
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">نص الفوتر (يظهر في النصفين)</label>
+            <input className="input text-center font-extrabold" value={s.footerTitle} onChange={(e) => set('footerTitle', e.target.value)} />
+          </div>
+          <ColorField label="بداية التدرج" value={s.footerFrom} onChange={(v) => set('footerFrom', v)} />
+          <ColorField label="نهاية التدرج" value={s.footerTo} onChange={(v) => set('footerTo', v)} />
+          <ColorField label="لون نص الفوتر" value={s.footerTextColor} onChange={(v) => set('footerTextColor', v)} />
+          <div>
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">ارتفاع الفوتر (مم)</label>
+            <input className="input" type="number" min={3} max={20} step={0.5} value={s.footerHeight}
+              onChange={(e) => set('footerHeight', Math.max(3, Math.min(20, Number(e.target.value))))} />
+          </div>
+          <div className="col-span-2">
+            <label className="block text-xs font-bold text-gray-500 mb-1.5">معاينة الفوتر</label>
+            <div className="rounded-xl flex items-center justify-center text-xs font-extrabold"
+              style={{ background: footerGrad, color: s.footerTextColor, height: `${Math.max(24, s.footerHeight * 4)}px` }}>{s.footerTitle || 'نص الفوتر'}</div>
+          </div>
+
           <div className="col-span-2">
             <label className="block text-xs font-bold text-gray-500 mb-1.5">الأيقونة (شعار الكارت)</label>
             <div className="flex items-center gap-3">
@@ -145,11 +471,11 @@ export default function PrintCardsPage() {
                 اختر صورة
                 <input type="file" accept="image/*" className="hidden" onChange={(e) => onPickIcon(e.target.files?.[0] || null)} />
               </label>
-              {iconUrl ? (
+              {s.iconUrl ? (
                 <div className="flex items-center gap-2">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={iconUrl} alt="icon" className="w-10 h-10 rounded-xl object-contain border border-violet-100 bg-white" />
-                  <button onClick={() => setIconUrl('')} className="text-xs font-bold text-rose-500">إزالة</button>
+                  <img src={s.iconUrl} alt="icon" className="w-10 h-10 rounded-xl object-contain border border-violet-100 bg-white" />
+                  <button onClick={() => set('iconUrl', '')} className="text-xs font-bold text-rose-500">إزالة</button>
                 </div>
               ) : (
                 <span className="text-xs text-gray-400 font-semibold">لم تُحدَّد أيقونة بعد</span>
@@ -159,6 +485,7 @@ export default function PrintCardsPage() {
         </div>
 
         {err && <p className="text-sm font-bold text-rose-600 bg-rose-50 rounded-xl px-3 py-2">{err}</p>}
+        {msg && <p className="text-sm font-bold text-emerald-600 bg-emerald-50 rounded-xl px-3 py-2">{msg}</p>}
 
         <div className="flex items-center gap-3">
           <button onClick={generate} disabled={busy} className="btn-primary flex-1">
@@ -170,9 +497,17 @@ export default function PrintCardsPage() {
         </div>
 
         {cards.length > 0 && (
-          <p className="text-xs font-bold text-emerald-600 bg-emerald-50 rounded-xl px-3 py-2 text-center">
-            ✅ تم توليد {cards.length} كارت على {pages.length} صفحة A4 — اضغط «طباعة» ثم اختر A4 وهوامش صفرية
-          </p>
+          <div className="space-y-2">
+            <p className="text-xs font-bold text-emerald-600 bg-emerald-50 rounded-xl px-3 py-2 text-center">
+              ✅ تم توليد {cards.length} كارت على {pages.length} صفحة A4 — اضغط «طباعة» ثم اختر A4 وهوامش صفرية
+            </p>
+            {printedRange && (
+              <button onClick={recordPrinted} disabled={recording}
+                className="w-full text-sm font-extrabold bg-violet-600 text-white rounded-xl px-3 py-2.5 hover:bg-violet-700 disabled:opacity-60">
+                {recording ? '...' : `📌 تسجيل: بادئة «${printedRange.prefix}» طُبعت حتى رقم ${printedRange.to}`}
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -183,42 +518,18 @@ export default function PrintCardsPage() {
             <div key={pi} className="print-page bg-white mx-auto shadow-lg no-print:shadow-lg">
               <div
                 className="cards-grid"
-                style={{ columnGap: `${gapX}mm`, rowGap: `${gapY}mm` }}
+                style={{ columnGap: `${s.gapX}mm`, rowGap: `${s.gapY}mm` }}
               >
                 {page.map((c) => (
-                  <div key={c.code} className="print-card" style={{ background: cardBg }}>
-                    {/* النصف الأول: كارت الأهل */}
-                    <div className="card-half">
-                      <div className="card-head">
-                        {iconUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={iconUrl} alt="" className="card-icon" />
-                        ) : null}
-                        <span className="card-title">{title}</span>
-                      </div>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={qrMap[c.code]} alt={c.code} className="qr-img" />
-                      <div className="card-code" dir="ltr">{c.code}</div>
-                      <div className="half-label">كارت الأهل</div>
-                    </div>
+                  <div key={c.code} className="print-card" style={{ background: s.cardBg, border: cardBorder }}>
+                    {/* النصف الأول: كارت ولي الأمر (عرضه = موضع خط القص) */}
+                    {half(c.code, 'كارت ولي الأمر', s.cutPos)}
 
                     {/* خط القص الرأسي */}
                     <div className="cut-line" aria-hidden="true">✂</div>
 
                     {/* النصف الثاني: كارت الطفل */}
-                    <div className="card-half">
-                      <div className="card-head">
-                        {iconUrl ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img src={iconUrl} alt="" className="card-icon" />
-                        ) : null}
-                        <span className="card-title">{title}</span>
-                      </div>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={qrMap[c.code]} alt={c.code} className="qr-img" />
-                      <div className="card-code" dir="ltr">{c.code}</div>
-                      <div className="half-label">كارت الطفل</div>
-                    </div>
+                    {half(c.code, 'كارت الطفل', 100 - s.cutPos)}
                   </div>
                 ))}
               </div>

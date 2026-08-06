@@ -96,24 +96,99 @@ body {
 
 /* الكارت الواحد: عرضي (Landscape) — نصفان متطابقان مع خط قص رأسي */
 .print-card {
-  border: 1.5px dashed #c4b5fd;
+  border: 1.5px solid #7c3aed; /* تُستبدل inline من الصفحة (سمك/لون/نمط) */
   border-radius: 3mm;
   display: flex;
   flex-direction: row;
   align-items: stretch;
   background: #ffffff;
   overflow: hidden;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
 }
 
-/* النصف الواحد: الاسم أعلى → QR → الكود */
+/* النصف الواحد: هيدر متدرج → (pill + QR + pill) → فوتر متدرج
+   العرض يُضبط inline من الصفحة (موضع خط القص) */
 .print-card .card-half {
-  flex: 1;
+  flex: 0 0 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-between;
-  padding: 2mm 1.5mm;
+}
+
+/* شريط الهيدر المتدرج (اللون والارتفاع inline من الصفحة) */
+.print-card .half-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5mm;
+  padding: 0 1.5mm;
+  overflow: hidden;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+/* جسم الكارت: pill التسمية + QR + pill الكود */
+.print-card .half-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1mm;
+  padding: 1mm 1.5mm;
+}
+
+/* pill أبيض (التسمية / الكود) */
+.print-card .card-pill {
+  background: #ffffff;
+  border: 0.3mm solid #e5e7eb;
+  border-radius: 999px;
+  padding: 0.6mm 3mm;
+  font-family: 'Cairo', sans-serif;
+  font-weight: 800;
+  font-size: 2.9mm;
+  color: #1e1b4b;
+  text-align: center;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+/* خلفية بيضاء حول الـ QR */
+.print-card .qr-wrap {
+  background: #ffffff;
+  border: 0.3mm solid #e5e7eb;
+  border-radius: 2mm;
+  padding: 1mm;
+  line-height: 0;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+/* شريط الفوتر المتدرج (اللون والارتفاع inline من الصفحة) */
+.print-card .half-footer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Cairo', sans-serif;
+  font-weight: 800;
+  font-size: 2.8mm;
+  text-align: center;
+  padding: 0 1.5mm;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
 }
 
 /* خط القص الرأسي بين النصفين */
@@ -128,13 +203,6 @@ body {
   color: #9ca3af;
 }
 
-.print-card .card-head {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 1.5mm;
-  width: 100%;
-}
 .print-card .card-icon {
   width: 6mm;
   height: 6mm;
@@ -144,7 +212,6 @@ body {
   font-family: 'Cairo', sans-serif;
   font-weight: 800;
   font-size: 3.2mm;
-  color: #6d28d9;
   text-align: center;
   line-height: 1.2;
   white-space: nowrap;
@@ -153,27 +220,15 @@ body {
 }
 
 .print-card .qr-img {
-  width: 20mm;
-  height: 20mm;
+  width: 17mm;
+  height: 17mm;
   image-rendering: pixelated;
+  display: block;
 }
 
-.print-card .card-code {
-  font-family: 'Cairo', sans-serif;
-  font-weight: 800;
-  font-size: 3.4mm;
-  letter-spacing: 0.5px;
-  color: #1e1b4b;
-  text-align: center;
-}
 
-.print-card .half-label {
-  font-family: 'Cairo', sans-serif;
-  font-weight: 700;
-  font-size: 2.6mm;
-  color: #6b7280;
-  text-align: center;
-}
+
+
 
 /* عناصر لا تظهر عند الطباعة */
 @media print {
@@ -191,5 +246,10 @@ body {
     break-after: page;
   }
   .print-page:last-child { page-break-after: auto; break-after: auto; }
-  .print-card { border-color: #d1d5db; }
+  .print-card,
+  .print-card .half-header,
+  .print-card .half-footer {
+    print-color-adjust: exact !important;
+    -webkit-print-color-adjust: exact !important;
+  }
 }
