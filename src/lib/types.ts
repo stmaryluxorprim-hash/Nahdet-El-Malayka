@@ -81,3 +81,40 @@ export interface PointTx {
   date: string
   created_at: string
 }
+
+// ===== v9: الخريطة التفاعلية (Carnival Map) =====
+export interface CarnivalState {
+  id: number
+  title: string
+  round_seconds: number
+  total_rounds: number
+  current_round: number
+  started_at: string | null
+  paused_remaining: number | null
+  updated_at: string
+}
+
+export interface CarnivalTeam {
+  id: string
+  name: string
+  leader: string | null
+  color: string
+  sort_order: number
+  created_at: string
+}
+
+export interface CarnivalRoom {
+  id: string
+  name: string
+  icon: string
+  sort_order: number
+  created_at: string
+}
+
+export interface CarnivalAssignment {
+  id: string
+  round: number
+  team_id: string
+  room_id: string
+  created_at: string
+}

@@ -18,6 +18,7 @@ const EXTRA_PAGES: NavItem[] = [
   { href: '/schedule', label: 'تنظيم اليوم', icon: 'schedule' },
   { href: '/print-cards', label: 'طباعة كروت', icon: 'print' },
   { href: '/pickup', label: 'استدعاء', icon: 'megaphone' },
+  { href: '/map', label: 'الخريطة التفاعلية', icon: 'map' },
 ]
 
 export default function SideDrawer({ open, onClose }: { open: boolean; onClose: () => void }) {

@@ -20,6 +20,7 @@ export type IconName =
   | 'megaphone'
   | 'expand'
   | 'shrink'
+  | 'map'
 
 type Props = {
   name: IconName
@@ -130,6 +131,14 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M16 3v3a2 2 0 0 0 2 2h3" />
       <path d="M21 16h-3a2 2 0 0 0-2 2v3" />
       <path d="M3 16h3a2 2 0 0 1 2 2v3" />
+    </>
+  ),
+  // الخريطة التفاعلية — خريطة مطوية مع دبوس
+  map: (
+    <>
+      <path d="M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4Z" />
+      <path d="M9 4v14" />
+      <path d="M15 6v14" />
     </>
   ),
   // ملاك — شعار التطبيق
