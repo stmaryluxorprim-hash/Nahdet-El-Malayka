@@ -72,6 +72,16 @@ body {
 .animate-pop { animation: pop .25s cubic-bezier(.34,1.56,.64,1); }
 @keyframes pop { from { opacity: 0; transform: scale(.85);} to { opacity: 1; transform: scale(1);} }
 
+/* 🔔 اهتزاز بانر الرنين الجماعي */
+.ring-anim { animation: ringShake .6s ease-in-out infinite; }
+@keyframes ringShake {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(-1.2deg); }
+  40% { transform: rotate(1.2deg); }
+  60% { transform: rotate(-0.8deg); }
+  80% { transform: rotate(0.8deg); }
+}
+
 /* hide scrollbars for chip rows */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

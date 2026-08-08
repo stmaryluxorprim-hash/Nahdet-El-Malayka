@@ -3,6 +3,7 @@ import { useState, useRef } from 'react'
 import { usePathname } from 'next/navigation'
 import { useUi } from '@/contexts/UiContext'
 import SideDrawer from '@/components/SideDrawer'
+import NotificationsBell from '@/components/NotificationsBell'
 import Icon, { IconName } from '@/components/Icon'
 
 const TITLES: Record<string, { title: string; sub: string; icon: IconName }> = {
@@ -46,6 +47,8 @@ export default function AppHeader() {
             </div>
           </div>
           <div className="flex items-center gap-2 shrink-0">
+            {/* 🔔 الإشعارات */}
+            <NotificationsBell />
             {/* زر اختيار التاريخ */}
             <div className="relative">
               <button id="date-btn" onClick={openDatePicker} title={date}

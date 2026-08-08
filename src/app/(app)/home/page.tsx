@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { getSupabase } from '@/lib/supabase'
+import { cairoToday } from '@/lib/serverClock'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRealtime } from '@/lib/useRealtime'
 import type { Child } from '@/lib/types'
@@ -14,7 +15,7 @@ export default function HomePage() {
 
   const load = useCallback(async () => {
     const supabase = getSupabase()
-    const today = new Date().toISOString().slice(0, 10)
+    const today = cairoToday()
 
     const [cRes, aRes, pRes, topRes, newRes] = await Promise.all([
       supabase.from('children').select('id', { count: 'exact', head: true }).eq('is_active', true),

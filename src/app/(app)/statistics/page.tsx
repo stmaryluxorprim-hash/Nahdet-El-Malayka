@@ -4,10 +4,12 @@ import { getSupabase } from '@/lib/supabase'
 import { useRealtime } from '@/lib/useRealtime'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LineChart, Line, CartesianGrid } from 'recharts'
 import type { ClassRow } from '@/lib/types'
+import { serverNowDate, cairoDateOf } from '@/lib/serverClock'
 
+// 📅 بتوقيت القاهرة + ساعة السيرفر (وليس ساعة الجهاز)
 const daysAgo = (n: number) => {
-  const d = new Date(); d.setDate(d.getDate() - n)
-  return d.toISOString().slice(0, 10)
+  const d = serverNowDate(); d.setDate(d.getDate() - n)
+  return cairoDateOf(d)
 }
 
 export default function StatisticsPage() {
