@@ -91,6 +91,7 @@ export interface CarnivalState {
   current_round: number
   started_at: string | null
   paused_remaining: number | null
+  auto_advance: boolean
   updated_at: string
 }
 

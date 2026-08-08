@@ -80,7 +80,63 @@ export default function MapPage() {
   const running = !!state?.started_at && state?.paused_remaining == null && remaining > 0
   const timeUp = !!state?.started_at && state?.paused_remaining == null && remaining <= 0
   const paused = state?.paused_remaining != null
-  const progress = roundSeconds > 0 ? remaining / roundSeconds : 0
+  const progress = roundSeconds > 0 ? Math.min(1, remaining / roundSeconds) : 0
+
+  // ---- alarm ringing (Web Audio) ----
+  const audioCtxRef = useRef<AudioContext | null>(null)
+  const ringIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [ringing, setRinging] = useState(false)
+
+  const beep = useCallback(() => {
+    try {
+      if (!audioCtxRef.current) {
+        const AC = window.AudioContext || (window as any).webkitAudioContext
+        audioCtxRef.current = new AC()
+      }
+      const ctx = audioCtxRef.current
+      if (ctx.state === 'suspended') ctx.resume()
+      // رنّة ثنائية (مثل جرس المنبه)
+      ;[0, 0.28].forEach((offset) => {
+        const osc = ctx.createOscillator()
+        const gain = ctx.createGain()
+        osc.type = 'square'
+        osc.frequency.setValueAtTime(880, ctx.currentTime + offset)
+        osc.frequency.setValueAtTime(660, ctx.currentTime + offset + 0.12)
+        gain.gain.setValueAtTime(0.001, ctx.currentTime + offset)
+        gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + offset + 0.02)
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + offset + 0.24)
+        osc.connect(gain).connect(ctx.destination)
+        osc.start(ctx.currentTime + offset)
+        osc.stop(ctx.currentTime + offset + 0.26)
+      })
+    } catch {}
+  }, [])
+
+  const stopRinging = useCallback(() => {
+    if (ringIntervalRef.current) { clearInterval(ringIntervalRef.current); ringIntervalRef.current = null }
+    setRinging(false)
+  }, [])
+
+  const startRinging = useCallback(() => {
+    if (ringIntervalRef.current) return
+    beep()
+    ringIntervalRef.current = setInterval(beep, 1100)
+    setRinging(true)
+  }, [beep])
+
+  // رنّ عند انتهاء الوقت — وتوقف عند تغيير الجولة/الإعادة/إضافة وقت
+  useEffect(() => {
+    if (timeUp) startRinging()
+    else stopRinging()
+    return stopRinging
+  }, [timeUp, startRinging, stopRinging])
+
+  // إيقاف تلقائي للرنين بعد 45 ثانية
+  useEffect(() => {
+    if (!ringing) return
+    const t = setTimeout(stopRinging, 45000)
+    return () => clearTimeout(t)
+  }, [ringing, stopRinging])
 
   const roomOfTeam = useCallback((teamId: string) => {
     const a = assignments.find((x) => x.round === (state?.current_round ?? 1) && x.team_id === teamId)
@@ -103,11 +159,44 @@ export default function MapPage() {
     updState({ started_at: startedAt.toISOString(), paused_remaining: null })
   }
   const resetTimer = () => updState({ started_at: null, paused_remaining: null })
-  const goRound = (r: number) => {
+  const goRound = (r: number, autoStart = false) => {
     const total = state?.total_rounds ?? 1
     const round = Math.min(Math.max(1, r), total)
-    updState({ current_round: round, started_at: null, paused_remaining: null })
+    updState({
+      current_round: round,
+      started_at: autoStart ? new Date().toISOString() : null,
+      paused_remaining: null,
+    })
   }
+
+  // إضافة / خصم وقت أثناء الجولة (أو أثناء الإيقاف المؤقت / بعد انتهاء الوقت)
+  const adjustTime = (deltaSec: number) => {
+    if (!state) return
+    if (state.paused_remaining != null) {
+      updState({ paused_remaining: Math.max(0, state.paused_remaining + deltaSec) })
+    } else if (state.started_at) {
+      // تحريك بداية العدّ يزيد/ينقص المتبقي مباشرة
+      const newStart = new Date(new Date(state.started_at).getTime() + deltaSec * 1000)
+      updState({ started_at: newStart.toISOString() })
+    }
+  }
+
+  // التغيير التلقائي للجولة: عند انتهاء الوقت والوضع تلقائي — جولة تالية + بدء فوري
+  // (ينفّذها جهاز مسؤول فقط حتى لا يكتب أكثر من جهاز في نفس اللحظة)
+  const advancedKeyRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!timeUp || !state?.auto_advance || !canManage) return
+    const key = `${state.current_round}|${state.started_at}`
+    if (advancedKeyRef.current === key) return
+    advancedKeyRef.current = key
+    if (state.current_round < state.total_rounds) {
+      // رنّة قصيرة ثم انتقال تلقائي بعد 3 ثوانٍ
+      const t = setTimeout(() => goRound(state.current_round + 1, true), 3000)
+      return () => clearTimeout(t)
+    }
+    // آخر جولة: يظل الرنين حتى يوقفه المسؤول
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timeUp, state?.auto_advance, state?.current_round, state?.started_at, state?.total_rounds, canManage])
 
   // ring
   const R = 118
@@ -187,14 +276,48 @@ export default function MapPage() {
                   </span>
                   <span className={`text-xs font-bold mt-1 ${
                     timeUp ? 'text-red-400' : running ? 'text-emerald-500' : dark ? 'text-gray-500' : 'text-gray-400'}`}>
-                    {timeUp ? '⏰ انتهت الجولة!' : running ? '⏳ الجولة جارية' : paused ? '⏸️ متوقف مؤقتاً' : 'في الانتظار'}
+                    {timeUp
+                      ? (state.auto_advance && state.current_round < state.total_rounds ? '⏰ انتهت الجولة — انتقال تلقائي...' : '⏰ انتهت الجولة!')
+                      : running ? '⏳ الجولة جارية' : paused ? '⏸️ متوقف مؤقتاً' : 'في الانتظار'}
+                  </span>
+                  <span className={`text-[10px] font-bold mt-0.5 ${dark ? 'text-gray-600' : 'text-gray-300'}`}>
+                    {state.auto_advance ? '🔁 تغيير تلقائي للجولات' : '✋ تغيير يدوي للجولات'}
                   </span>
                 </div>
               </div>
 
+              {/* stop-ringing (visible to everyone while ringing) */}
+              {ringing && (
+                <button onClick={stopRinging}
+                  className="mt-3 rounded-2xl px-5 py-2.5 text-sm font-extrabold bg-red-600 text-white active:scale-95 transition-all shadow-lg shadow-red-600/30 animate-pulse">
+                  🔕 إيقاف الرنين
+                </button>
+              )}
+
+              {/* ± time adjustment (managers, while timer active) */}
+              {canManage && (running || paused || timeUp) && (
+                <div className="flex items-center justify-center gap-1.5 mt-4">
+                  {[-60, -30].map((d) => (
+                    <button key={d} onClick={() => adjustTime(d)}
+                      className={`rounded-2xl px-3 py-2 text-xs font-extrabold active:scale-95 transition-all ${
+                        dark ? 'bg-red-500/15 text-red-300' : 'bg-red-50 text-red-600'}`}>
+                      −{Math.abs(d) === 60 ? '١ د' : '٣٠ ث'}
+                    </button>
+                  ))}
+                  <span className={`text-[10px] font-extrabold px-1 ${dark ? 'text-gray-600' : 'text-gray-300'}`}>الوقت</span>
+                  {[30, 60].map((d) => (
+                    <button key={d} onClick={() => adjustTime(d)}
+                      className={`rounded-2xl px-3 py-2 text-xs font-extrabold active:scale-95 transition-all ${
+                        dark ? 'bg-emerald-500/15 text-emerald-300' : 'bg-emerald-50 text-emerald-600'}`}>
+                      +{d === 60 ? '١ د' : '٣٠ ث'}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* manager timer controls */}
               {canManage && (
-                <div className="flex flex-wrap items-center justify-center gap-2 mt-4">
+                <div className="flex flex-wrap items-center justify-center gap-2 mt-3">
                   <button onClick={() => goRound(state.current_round - 1)} disabled={state.current_round <= 1}
                     className={`rounded-2xl px-3 py-2.5 text-sm font-extrabold active:scale-95 transition-all disabled:opacity-30 ${
                       dark ? 'bg-gray-800 text-gray-200' : 'bg-gray-100 text-gray-600'}`}>
@@ -285,6 +408,7 @@ function SetupModal({ open, onClose, state, teams, rooms, assignments, reload }:
   const [roundMin, setRoundMin] = useState('10')
   const [roundSec, setRoundSec] = useState('0')
   const [totalRounds, setTotalRounds] = useState('3')
+  const [autoAdvance, setAutoAdvance] = useState(false)
   useEffect(() => {
     if (!open) return
     setTitle(state?.title || 'الخريطة التفاعلية')
@@ -292,6 +416,7 @@ function SetupModal({ open, onClose, state, teams, rooms, assignments, reload }:
     setRoundMin(String(Math.floor(rs / 60)))
     setRoundSec(String(rs % 60))
     setTotalRounds(String(state?.total_rounds ?? 3))
+    setAutoAdvance(!!state?.auto_advance)
   }, [open, state])
 
   const saveSettings = async () => {
@@ -301,6 +426,7 @@ function SetupModal({ open, onClose, state, teams, rooms, assignments, reload }:
     await supabase.from('carnival_state').upsert({
       id: 1, title: title.trim() || 'الخريطة التفاعلية',
       round_seconds: secs, total_rounds: total,
+      auto_advance: autoAdvance,
       current_round: Math.min(state?.current_round ?? 1, total),
       updated_at: new Date().toISOString(),
     })
@@ -330,6 +456,22 @@ function SetupModal({ open, onClose, state, teams, rooms, assignments, reload }:
     reload()
   }
 
+  // تعديل فريق (الاسم + القائد)
+  const [editTeamId, setEditTeamId] = useState<string | null>(null)
+  const [editTeamName, setEditTeamName] = useState('')
+  const [editTeamLeader, setEditTeamLeader] = useState('')
+  const beginEditTeam = (t: CarnivalTeam) => {
+    setEditTeamId(t.id); setEditTeamName(t.name); setEditTeamLeader(t.leader || '')
+  }
+  const saveEditTeam = async () => {
+    if (!editTeamId || !editTeamName.trim()) return
+    await getSupabase().from('carnival_teams').update({
+      name: editTeamName.trim(), leader: editTeamLeader.trim() || null,
+    }).eq('id', editTeamId)
+    setEditTeamId(null)
+    reload()
+  }
+
   // rooms form
   const [roomName, setRoomName] = useState('')
   const [roomIcon, setRoomIcon] = useState('🎪')
@@ -343,6 +485,22 @@ function SetupModal({ open, onClose, state, teams, rooms, assignments, reload }:
   }
   const delRoom = async (id: string) => {
     await getSupabase().from('carnival_rooms').delete().eq('id', id)
+    reload()
+  }
+
+  // تعديل غرفة (الاسم + الأيقونة)
+  const [editRoomId, setEditRoomId] = useState<string | null>(null)
+  const [editRoomName, setEditRoomName] = useState('')
+  const [editRoomIcon, setEditRoomIcon] = useState('🎪')
+  const beginEditRoom = (r: CarnivalRoom) => {
+    setEditRoomId(r.id); setEditRoomName(r.name); setEditRoomIcon(r.icon)
+  }
+  const saveEditRoom = async () => {
+    if (!editRoomId || !editRoomName.trim()) return
+    await getSupabase().from('carnival_rooms').update({
+      name: editRoomName.trim(), icon: editRoomIcon,
+    }).eq('id', editRoomId)
+    setEditRoomId(null)
     reload()
   }
 
@@ -425,6 +583,26 @@ function SetupModal({ open, onClose, state, teams, rooms, assignments, reload }:
               <input className="input text-center" type="number" min={1} max={50} value={totalRounds} onChange={(e) => setTotalRounds(e.target.value)} />
             </div>
           </div>
+
+          {/* وضع تغيير الجولة */}
+          <div>
+            <label className="text-xs font-extrabold text-gray-500 mb-1.5 block">تغيير الجولة عند انتهاء الوقت</label>
+            <div className="grid grid-cols-2 gap-2">
+              <button type="button" onClick={() => setAutoAdvance(false)}
+                className={`rounded-2xl border-2 p-3 text-right transition-all active:scale-[0.98] ${
+                  !autoAdvance ? 'border-violet-600 bg-violet-50' : 'border-gray-100 bg-white'}`}>
+                <p className={`font-extrabold text-sm ${!autoAdvance ? 'text-violet-700' : 'text-gray-600'}`}>✋ يدوي</p>
+                <p className="text-[10px] font-bold text-gray-400 mt-0.5 leading-relaxed">يرنّ الجرس وينتظر حتى تضغط «الجولة التالية» بنفسك</p>
+              </button>
+              <button type="button" onClick={() => setAutoAdvance(true)}
+                className={`rounded-2xl border-2 p-3 text-right transition-all active:scale-[0.98] ${
+                  autoAdvance ? 'border-violet-600 bg-violet-50' : 'border-gray-100 bg-white'}`}>
+                <p className={`font-extrabold text-sm ${autoAdvance ? 'text-violet-700' : 'text-gray-600'}`}>🔁 تلقائي</p>
+                <p className="text-[10px] font-bold text-gray-400 mt-0.5 leading-relaxed">يرنّ الجرس ثم ينتقل للجولة التالية ويبدأ العدّ تلقائياً</p>
+              </button>
+            </div>
+          </div>
+
           <button onClick={saveSettings} className="btn-primary w-full">💾 حفظ الإعدادات</button>
         </div>
       )}
@@ -439,15 +617,35 @@ function SetupModal({ open, onClose, state, teams, rooms, assignments, reload }:
           <button onClick={addTeam} disabled={!teamName.trim()} className="btn-primary w-full">➕ إضافة فريق</button>
           <div className="space-y-2">
             {teams.map((t) => (
-              <div key={t.id} className="flex items-center gap-2 rounded-2xl border-2 border-gray-100 p-2.5">
-                <input type="color" value={t.color} onChange={(e) => setTeamColor(t.id, e.target.value)}
-                  className="w-8 h-8 rounded-xl border-0 cursor-pointer shrink-0" style={{ background: t.color }} />
-                <div className="flex-1 min-w-0">
-                  <p className="font-extrabold text-sm text-gray-800 truncate">{t.name}</p>
-                  {t.leader && <p className="text-[11px] font-bold text-gray-400 truncate">👤 {t.leader}</p>}
+              editTeamId === t.id ? (
+                <div key={t.id} className="rounded-2xl border-2 border-violet-300 bg-violet-50/50 p-2.5 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <input className="input !py-2" placeholder="اسم الفريق *" value={editTeamName}
+                      onChange={(e) => setEditTeamName(e.target.value)} autoFocus />
+                    <input className="input !py-2" placeholder="قائد الفريق" value={editTeamLeader}
+                      onChange={(e) => setEditTeamLeader(e.target.value)} />
+                  </div>
+                  <div className="flex gap-2">
+                    <button onClick={saveEditTeam} disabled={!editTeamName.trim()}
+                      className="flex-1 rounded-xl bg-violet-600 text-white font-extrabold py-2 text-xs active:scale-95 transition-all disabled:opacity-50">✔️ حفظ</button>
+                    <button onClick={() => setEditTeamId(null)}
+                      className="flex-1 rounded-xl bg-gray-100 text-gray-500 font-extrabold py-2 text-xs active:scale-95 transition-all">إلغاء</button>
+                  </div>
                 </div>
-                <button onClick={() => delTeam(t.id)} className="w-8 h-8 rounded-xl bg-red-50 text-red-500 font-bold shrink-0 active:scale-95">✕</button>
-              </div>
+              ) : (
+                <div key={t.id} className="flex items-center gap-2 rounded-2xl border-2 border-gray-100 p-2.5">
+                  <input type="color" value={t.color} onChange={(e) => setTeamColor(t.id, e.target.value)}
+                    className="w-8 h-8 rounded-xl border-0 cursor-pointer shrink-0" style={{ background: t.color }} />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-extrabold text-sm text-gray-800 truncate">{t.name}</p>
+                    {t.leader && <p className="text-[11px] font-bold text-gray-400 truncate">👤 {t.leader}</p>}
+                  </div>
+                  <button onClick={() => beginEditTeam(t)} className="w-8 h-8 rounded-xl bg-violet-50 text-violet-600 shrink-0 active:scale-95 flex items-center justify-center" title="تعديل">
+                    ✏️
+                  </button>
+                  <button onClick={() => delTeam(t.id)} className="w-8 h-8 rounded-xl bg-red-50 text-red-500 font-bold shrink-0 active:scale-95">✕</button>
+                </div>
+              )
             ))}
             {teams.length === 0 && <p className="text-center text-xs font-bold text-gray-300 py-3">لا توجد فرق بعد</p>}
           </div>
@@ -470,11 +668,34 @@ function SetupModal({ open, onClose, state, teams, rooms, assignments, reload }:
           </div>
           <div className="space-y-2">
             {rooms.map((r) => (
-              <div key={r.id} className="flex items-center gap-2 rounded-2xl border-2 border-gray-100 p-2.5">
-                <span className="text-2xl shrink-0">{r.icon}</span>
-                <p className="flex-1 font-extrabold text-sm text-gray-800 truncate">{r.name}</p>
-                <button onClick={() => delRoom(r.id)} className="w-8 h-8 rounded-xl bg-red-50 text-red-500 font-bold shrink-0 active:scale-95">✕</button>
-              </div>
+              editRoomId === r.id ? (
+                <div key={r.id} className="rounded-2xl border-2 border-violet-300 bg-violet-50/50 p-2.5 space-y-2">
+                  <div className="flex gap-1 flex-wrap">
+                    {ROOM_ICONS.map((ic) => (
+                      <button key={ic} onClick={() => setEditRoomIcon(ic)}
+                        className={`w-8 h-8 rounded-lg text-base transition-all active:scale-90 ${editRoomIcon === ic ? 'bg-violet-600 scale-110' : 'bg-white'}`}>{ic}</button>
+                    ))}
+                  </div>
+                  <input className="input !py-2" placeholder="اسم الغرفة *" value={editRoomName}
+                    onChange={(e) => setEditRoomName(e.target.value)} autoFocus
+                    onKeyDown={(e) => e.key === 'Enter' && saveEditRoom()} />
+                  <div className="flex gap-2">
+                    <button onClick={saveEditRoom} disabled={!editRoomName.trim()}
+                      className="flex-1 rounded-xl bg-violet-600 text-white font-extrabold py-2 text-xs active:scale-95 transition-all disabled:opacity-50">✔️ حفظ</button>
+                    <button onClick={() => setEditRoomId(null)}
+                      className="flex-1 rounded-xl bg-gray-100 text-gray-500 font-extrabold py-2 text-xs active:scale-95 transition-all">إلغاء</button>
+                  </div>
+                </div>
+              ) : (
+                <div key={r.id} className="flex items-center gap-2 rounded-2xl border-2 border-gray-100 p-2.5">
+                  <span className="text-2xl shrink-0">{r.icon}</span>
+                  <p className="flex-1 font-extrabold text-sm text-gray-800 truncate">{r.name}</p>
+                  <button onClick={() => beginEditRoom(r)} className="w-8 h-8 rounded-xl bg-violet-50 text-violet-600 shrink-0 active:scale-95 flex items-center justify-center" title="تعديل">
+                    ✏️
+                  </button>
+                  <button onClick={() => delRoom(r.id)} className="w-8 h-8 rounded-xl bg-red-50 text-red-500 font-bold shrink-0 active:scale-95">✕</button>
+                </div>
+              )
             ))}
             {rooms.length === 0 && <p className="text-center text-xs font-bold text-gray-300 py-3">لا توجد غرف بعد</p>}
           </div>
