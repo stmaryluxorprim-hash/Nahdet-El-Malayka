@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { getSupabase } from '@/lib/supabase'
+import { cairoToday, serverNowIso } from '@/lib/serverClock'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRealtime } from '@/lib/useRealtime'
 import Icon from '@/components/Icon'
@@ -17,7 +18,8 @@ export interface PickupCall {
   children?: Child | null
 }
 
-const todayStr = () => new Date().toISOString().slice(0, 10)
+// 📅 تاريخ اليوم بتوقيت القاهرة + ساعة السيرفر (وليس ساعة الجهاز)
+const todayStr = () => cairoToday()
 
 export default function PickupPage() {
   const { user, hasPermission } = useAuth()
@@ -66,7 +68,7 @@ export default function PickupPage() {
   const markDelivered = async (call: PickupCall) => {
     const supabase = getSupabase()
     await supabase.from('pickup_calls').update({
-      status: 'delivered', delivered_by: user?.id, delivered_at: new Date().toISOString(),
+      status: 'delivered', delivered_by: user?.id, delivered_at: serverNowIso(),
     }).eq('id', call.id)
     setConfirm(null)
     load()

@@ -21,6 +21,7 @@ export type IconName =
   | 'expand'
   | 'shrink'
   | 'map'
+  | 'bell'
 
 type Props = {
   name: IconName
@@ -139,6 +140,13 @@ const PATHS: Record<IconName, React.ReactNode> = {
       <path d="M9 4 3.5 6v14L9 18l6 2 5.5-2V4L15 6 9 4Z" />
       <path d="M9 4v14" />
       <path d="M15 6v14" />
+    </>
+  ),
+  // الإشعارات — جرس
+  bell: (
+    <>
+      <path d="M18 8a6 6 0 1 0-12 0c0 7-3 8-3 8h18s-3-1-3-8" />
+      <path d="M13.7 20a2 2 0 0 1-3.4 0" />
     </>
   ),
   // ملاك — شعار التطبيق

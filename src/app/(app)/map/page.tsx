@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { getSupabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import { useRealtime } from '@/lib/useRealtime'
+import { useServerClock, serverNowIso } from '@/lib/serverClock'
 import Icon from '@/components/Icon'
 import Modal from '@/components/Modal'
 import type { CarnivalState, CarnivalTeam, CarnivalRoom, CarnivalAssignment } from '@/lib/types'
@@ -30,32 +31,8 @@ export default function MapPage() {
   const [now, setNow] = useState(() => Date.now())
   const wrapRef = useRef<HTMLDivElement>(null)
 
-  // ---- مزامنة ساعة السيرفر (حتى لو ساعة الجهاز غير مظبوطة يظل المؤقّت موحّداً للجميع) ----
-  const [clockOffset, setClockOffset] = useState(0) // serverTime - localTime (ms)
-  const clockOffsetRef = useRef(0)
-  const syncClock = useCallback(async () => {
-    try {
-      const supabase = getSupabase()
-      let best: { offset: number; rtt: number } | null = null
-      for (let i = 0; i < 3; i++) {
-        const t0 = Date.now()
-        const { data, error } = await supabase.rpc('server_now')
-        const t1 = Date.now()
-        if (error || !data) return // الدالة غير موجودة → نكمل بساعة الجهاز
-        const rtt = t1 - t0
-        const offset = new Date(data as string).getTime() + rtt / 2 - t1
-        if (!best || rtt < best.rtt) best = { offset, rtt }
-      }
-      if (best) { clockOffsetRef.current = best.offset; setClockOffset(best.offset) }
-    } catch {}
-  }, [])
-  useEffect(() => {
-    syncClock()
-    const t = setInterval(syncClock, 5 * 60 * 1000) // إعادة مزامنة كل 5 دقائق
-    return () => clearInterval(t)
-  }, [syncClock])
-  // الوقت الحالي بتوقيت السيرفر (للكتابة في قاعدة البيانات)
-  const serverNowIso = () => new Date(Date.now() + clockOffsetRef.current).toISOString()
+  // ---- ⏱️ ساعة السيرفر الموحّدة (حتى لو ساعة الجهاز غير مظبوطة يظل المؤقّت موحّداً للجميع) ----
+  const clockOffset = useServerClock()
 
   const load = useCallback(async () => {
     const supabase = getSupabase()
@@ -173,40 +150,59 @@ export default function MapPage() {
   }, [assignments, rooms, state?.current_round])
 
   // ---- manager actions ----
+  // ✅ كل عمليات المؤقّت تُنفَّذ على السيرفر (RPC — migration v12) بساعة قاعدة
+  // البيانات نفسها — فلا تتأثر أبداً بساعة هاتف المدير حتى لو كانت خاطئة.
   const updState = async (patch: Partial<CarnivalState>) => {
     const supabase = getSupabase()
-    await supabase.from('carnival_state').upsert({ id: 1, ...patch, updated_at: new Date().toISOString() })
+    await supabase.from('carnival_state').upsert({ id: 1, ...patch, updated_at: serverNowIso() })
     load()
   }
 
-  const startTimer = () => updState({ started_at: serverNowIso(), paused_remaining: null })
-  const pauseTimer = () => updState({ paused_remaining: remaining })
-  const resumeTimer = () => {
-    // restart started_at so that elapsed = roundSeconds - paused_remaining (بتوقيت السيرفر)
-    const startedAt = new Date(Date.now() + clockOffsetRef.current - (roundSeconds - (state?.paused_remaining ?? roundSeconds)) * 1000)
-    updState({ started_at: startedAt.toISOString(), paused_remaining: null })
+  // RPC مع fallback للطريقة القديمة (لو migration_v12 لم يُنفَّذ بعد)
+  const timerRpc = async (fn: string, args: Record<string, unknown> | undefined, fallback: () => Promise<void>) => {
+    try {
+      const { error } = await getSupabase().rpc(fn, args)
+      if (error) await fallback()
+    } catch {
+      await fallback()
+    }
+    load()
   }
-  const resetTimer = () => updState({ started_at: null, paused_remaining: null })
+
+  const startTimer = () => timerRpc('carnival_start_timer', undefined,
+    () => updState({ started_at: serverNowIso(), paused_remaining: null }))
+  const pauseTimer = () => timerRpc('carnival_pause_timer', undefined,
+    () => updState({ paused_remaining: remaining }))
+  const resumeTimer = () => timerRpc('carnival_resume_timer', undefined, async () => {
+    // restart started_at so that elapsed = roundSeconds - paused_remaining (بتوقيت السيرفر)
+    const startedAt = new Date(new Date(serverNowIso()).getTime() - (roundSeconds - (state?.paused_remaining ?? roundSeconds)) * 1000)
+    await updState({ started_at: startedAt.toISOString(), paused_remaining: null })
+  })
+  const resetTimer = () => timerRpc('carnival_reset_timer', undefined,
+    () => updState({ started_at: null, paused_remaining: null }))
   const goRound = (r: number, autoStart = false) => {
     const total = state?.total_rounds ?? 1
     const round = Math.min(Math.max(1, r), total)
-    updState({
-      current_round: round,
-      started_at: autoStart ? serverNowIso() : null,
-      paused_remaining: null,
-    })
+    timerRpc('carnival_go_round', { p_round: round, p_auto_start: autoStart },
+      () => updState({
+        current_round: round,
+        started_at: autoStart ? serverNowIso() : null,
+        paused_remaining: null,
+      }))
   }
 
   // إضافة / خصم وقت أثناء الجولة (أو أثناء الإيقاف المؤقت / بعد انتهاء الوقت)
   const adjustTime = (deltaSec: number) => {
     if (!state) return
-    if (state.paused_remaining != null) {
-      updState({ paused_remaining: Math.max(0, state.paused_remaining + deltaSec) })
-    } else if (state.started_at) {
-      // تحريك بداية العدّ يزيد/ينقص المتبقي مباشرة
-      const newStart = new Date(new Date(state.started_at).getTime() + deltaSec * 1000)
-      updState({ started_at: newStart.toISOString() })
-    }
+    timerRpc('carnival_adjust_time', { p_delta: deltaSec }, async () => {
+      if (state.paused_remaining != null) {
+        await updState({ paused_remaining: Math.max(0, state.paused_remaining + deltaSec) })
+      } else if (state.started_at) {
+        // تحريك بداية العدّ يزيد/ينقص المتبقي مباشرة
+        const newStart = new Date(new Date(state.started_at).getTime() + deltaSec * 1000)
+        await updState({ started_at: newStart.toISOString() })
+      }
+    })
   }
 
   // التغيير التلقائي للجولة: عند انتهاء الوقت والوضع تلقائي — جولة تالية + بدء فوري
@@ -457,7 +453,7 @@ function SetupModal({ open, onClose, state, teams, rooms, assignments, reload }:
       round_seconds: secs, total_rounds: total,
       auto_advance: autoAdvance,
       current_round: Math.min(state?.current_round ?? 1, total),
-      updated_at: new Date().toISOString(),
+      updated_at: serverNowIso(),
     })
     reload()
   }

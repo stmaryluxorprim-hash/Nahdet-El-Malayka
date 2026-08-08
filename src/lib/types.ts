@@ -82,6 +82,17 @@ export interface PointTx {
   created_at: string
 }
 
+// ===== v12: الإشعارات =====
+export interface AppNotification {
+  id: string
+  title: string
+  body: string | null
+  ring: boolean
+  created_by: string | null
+  created_at: string
+  profiles?: Pick<Profile, 'id' | 'full_name'> | null
+}
+
 // ===== v9: الخريطة التفاعلية (Carnival Map) =====
 export interface CarnivalState {
   id: number

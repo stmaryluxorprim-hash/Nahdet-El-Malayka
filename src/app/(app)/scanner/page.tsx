@@ -1,6 +1,7 @@
 'use client'
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { getSupabase } from '@/lib/supabase'
+import { cairoToday, serverNowIso } from '@/lib/serverClock'
 import { useAuth } from '@/contexts/AuthContext'
 import QrScanner from '@/components/QrScanner'
 import ChildActionsSheet from '@/components/ChildActionsSheet'
@@ -71,7 +72,7 @@ export default function ScannerPage() {
       const pts = Math.abs(parseInt(points) || 0)
 
       if (mode === 'pickup') {
-        const today = new Date().toISOString().slice(0, 10)
+        const today = cairoToday()
         const { data: existing } = await supabase
           .from('pickup_calls').select('id')
           .eq('child_id', c.id).eq('date', today).eq('status', 'waiting')
@@ -164,10 +165,10 @@ export default function ScannerPage() {
   const resolvePickup = async (action: 'delivered' | 'toTop') => {
     if (!pickupPrompt) return
     const supabase = getSupabase()
-    const today = new Date().toISOString().slice(0, 10)
+    const today = cairoToday()
     if (action === 'delivered') {
       await supabase.from('pickup_calls').update({
-        status: 'delivered', delivered_by: user?.id, delivered_at: new Date().toISOString(),
+        status: 'delivered', delivered_by: user?.id, delivered_at: serverNowIso(),
       }).eq('id', pickupPrompt.callId)
       pushHistory(pickupPrompt.child.name, '✅ تم التسليم', true)
       setResult({ child: pickupPrompt.child, text: '✅ تم التسليم', ok: true })
