@@ -56,6 +56,7 @@
 8. **`supabase/migration_v8_pickup_calls.sql`** — 📣 **استدعاء الأطفال**: جدول `pickup_calls` (قائمة انتظار يومية بترتيب + حالة تسليم)، صلاحية `pickup.manage`، RLS، وتفعيل Realtime
 9. **`supabase/migration_v9_carnival_map.sql`** — 🗺️ **الخريطة التفاعلية**: جداول `carnival_state` (زمن الجولة/عدد الجولات/الجولة الحالية/المؤقّت) و`carnival_teams` و`carnival_rooms` و`carnival_assignments`، صلاحية `map.manage` (مدير/مشرف)، RLS (الجميع يقرأ — المسؤول فقط يكتب)، وتفعيل Realtime
 10. **`supabase/migration_v10_map_auto_advance.sql`** — 🔁 **تغيير الجولة التلقائي للخريطة**: عمود `auto_advance` في `carnival_state` (تلقائي: انتقال وبدء عدّ فوري بعد الرنين — يدوي: انتظار ضغط المسؤول)
+11. **`supabase/migration_v11_server_time.sql`** — ⏱️ **مزامنة توقيت السيرفر**: دالة `server_now()` — مؤقّت الخريطة يتزامن مع توقيت السيرفر فتتطابق العدّادات على كل الأجهزة حتى لو ساعة الجهاز غير مضبوطة
 
 > ⚠️ **مهم**: في Supabase → Authentication → Providers → Email: **عطّل "Confirm email"** — الدخول باسم المستخدم يستخدم بريداً داخلياً (`<username>@nahdat-app.local`).
 
