@@ -1,13 +1,14 @@
 'use client'
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 import { getSupabase } from '@/lib/supabase'
 import { useAuth } from '@/contexts/AuthContext'
 import QrScanner from '@/components/QrScanner'
 import ChildActionsSheet from '@/components/ChildActionsSheet'
 import { useUi } from '@/contexts/UiContext'
+import { useRealtime } from '@/lib/useRealtime'
 import type { Child } from '@/lib/types'
 
-type Mode = 'attendance' | 'addPoints' | 'subPoints' | 'view' | 'pickup'
+type Mode = 'attendance' | 'addPoints' | 'subPoints' | 'view' | 'pickup' | 'redeem'
 
 interface PickupPrompt { child: Child; callId: string }
 
@@ -35,6 +36,7 @@ export default function ScannerPage() {
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [selected, setSelected] = useState<Child | null>(null)
   const [pickupPrompt, setPickupPrompt] = useState<PickupPrompt | null>(null)
+  const [redeemChild, setRedeemChild] = useState<Child | null>(null)
   const busyRef = useRef(false)
 
   const MODES: { key: Mode; label: string; icon: string; cls: string; perm?: string }[] = [
@@ -43,6 +45,7 @@ export default function ScannerPage() {
     { key: 'subPoints', label: 'خصم نقاط', icon: '➖', cls: 'border-red-500 bg-red-50 text-red-600', perm: 'points.subtract' },
     { key: 'view', label: 'إظهار البيانات', icon: '👁️', cls: 'border-blue-500 bg-blue-50 text-blue-600', perm: 'children.view' },
     { key: 'pickup', label: 'استدعاء', icon: '📣', cls: 'border-violet-500 bg-violet-50 text-violet-700', perm: 'pickup.manage' },
+    { key: 'redeem', label: 'استبدال', icon: '🎁', cls: 'border-pink-500 bg-pink-50 text-pink-600', perm: 'points.subtract' },
   ]
   const modes = MODES.filter((m) => !m.perm || hasPermission(m.perm))
 
@@ -94,6 +97,13 @@ export default function ScannerPage() {
         beep(true)
         setResult({ child: c, text: '📣 تمت الإضافة لقائمة الاستدعاء', ok: true })
         pushHistory(c.name, '📣 استدعاء', true)
+        return
+      }
+
+      if (mode === 'redeem') {
+        beep(true)
+        setResult({ child: c, text: '🎁 استبدال نقاط', ok: true })
+        setRedeemChild(c)
         return
       }
 
@@ -208,13 +218,16 @@ export default function ScannerPage() {
           {mode === 'pickup' && (
             <p className="text-[11px] text-gray-400 font-semibold mt-2">📣 كل مسح = إضافة الطفل لصفحة الاستدعاء — ولو موجود بالفعل هيسألك: تم التسليم؟ أم إرسال لأول القائمة؟</p>
           )}
+          {mode === 'redeem' && (
+            <p className="text-[11px] text-gray-400 font-semibold mt-2">🎁 امسح الكارت → تظهر نافذة باسم الطفل ونقاطه لحظياً → اكتب عدد النقاط واضغط «خصم» — وتقدر تتراجع عن آخر عملية</p>
+          )}
         </section>
 
         {/* scanner */}
         <section id="scan-area" className="card p-3">
           {active ? (
             <div className="animate-fadeIn">
-              <QrScanner onScan={handleScan} paused={!!pickupPrompt} />
+              <QrScanner onScan={handleScan} paused={!!pickupPrompt || !!redeemChild} />
               <button onClick={() => setActive(false)} className="btn-soft w-full mt-3">⏹️ إيقاف الكاميرا</button>
             </div>
           ) : (
@@ -262,6 +275,15 @@ export default function ScannerPage() {
         onClose={() => setSelected(null)} onChanged={() => {}}
       />
 
+      {/* 🎁 استبدال النقاط */}
+      {redeemChild && (
+        <RedeemSheet
+          child={redeemChild} date={date} userId={user?.id}
+          onClose={() => setRedeemChild(null)}
+          onDone={(name, text, ok) => pushHistory(name, text, ok)}
+        />
+      )}
+
       {/* طفل موجود بالفعل في قائمة الاستدعاء — اختر الإجراء */}
       {pickupPrompt && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
@@ -293,6 +315,128 @@ export default function ScannerPage() {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+/* ================= 🎁 نافذة استبدال النقاط ================= */
+function RedeemSheet({ child, date, userId, onClose, onDone }: {
+  child: Child
+  date: string
+  userId?: string
+  onClose: () => void
+  onDone: (name: string, text: string, ok: boolean) => void
+}) {
+  const [livePoints, setLivePoints] = useState<number>(child.total_points)
+  const [amount, setAmount] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null)
+  const [lastTx, setLastTx] = useState<{ id: string; points: number } | null>(null)
+
+  // تحديث لحظي لنقاط الطفل
+  const refreshPoints = useCallback(async () => {
+    const { data } = await getSupabase()
+      .from('children').select('total_points').eq('id', child.id).maybeSingle()
+    if (data) setLivePoints(data.total_points)
+  }, [child.id])
+
+  useEffect(() => { refreshPoints() }, [refreshPoints])
+  useRealtime(['children', 'point_transactions'], refreshPoints)
+
+  const doRedeem = async () => {
+    const pts = Math.abs(parseInt(amount) || 0)
+    if (!pts) { setMsg({ text: '⚠️ أدخل عدد النقاط أولاً', ok: false }); return }
+    if (pts > livePoints) { setMsg({ text: `⚠️ النقاط غير كافية — رصيده ${livePoints} فقط`, ok: false }); return }
+    setBusy(true)
+    const { data, error } = await getSupabase().from('point_transactions').insert({
+      child_id: child.id, points: -pts, reason: 'استبدال نقاط',
+      category: 'redeem', date, created_by: userId,
+    }).select('id, points').maybeSingle()
+    setBusy(false)
+    if (error || !data) { setMsg({ text: '❌ خطأ أو لا توجد صلاحية', ok: false }); return }
+    beep(true)
+    setLastTx({ id: data.id, points: pts })
+    setMsg({ text: `✅ تم خصم ${pts} نقطة`, ok: true })
+    setAmount('')
+    onDone(child.name, `🎁 استبدال −${pts} نقطة`, true)
+    refreshPoints()
+  }
+
+  const undo = async () => {
+    if (!lastTx || busy) return
+    setBusy(true)
+    const { data: deleted, error } = await getSupabase()
+      .from('point_transactions').delete().eq('id', lastTx.id).select('id')
+    if (error || !deleted || deleted.length === 0) {
+      // لو الحذف مرفوض (للأدمن فقط) — نعوّض بمعاملة عكسية
+      const { error: e2 } = await getSupabase().from('point_transactions').insert({
+        child_id: child.id, points: lastTx.points, reason: 'تراجع عن استبدال',
+        category: 'redeem', date, created_by: userId,
+      })
+      if (e2) { setBusy(false); setMsg({ text: '❌ تعذر التراجع', ok: false }); return }
+    }
+    setBusy(false)
+    beep(true)
+    setMsg({ text: `↩️ تم التراجع — رجعت ${lastTx.points} نقطة`, ok: true })
+    onDone(child.name, `↩️ تراجع عن استبدال +${lastTx.points}`, true)
+    setLastTx(null)
+    refreshPoints()
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
+      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      <div className="relative bg-white w-full sm:max-w-md sm:rounded-3xl rounded-t-3xl p-5 animate-fadeIn">
+        {/* X close */}
+        <button onClick={onClose} aria-label="إغلاق"
+          className="absolute top-3 left-3 w-9 h-9 rounded-xl bg-gray-100 text-gray-500 font-extrabold text-lg active:scale-90 transition-all">
+          ✕
+        </button>
+
+        {/* child info */}
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-14 h-14 rounded-2xl bg-pink-100 overflow-hidden flex items-center justify-center text-3xl shrink-0">
+            {child.photo_url
+              ? <img src={child.photo_url} alt="" className="w-full h-full object-cover" />
+              : (child.gender === 'male' ? '👦' : '👧')}
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="font-extrabold text-gray-800 truncate text-lg">{child.name}</p>
+            <p className="text-[11px] text-gray-400 font-bold">{child.classes?.name || 'بدون فصل'} · 🎁 استبدال نقاط</p>
+          </div>
+        </div>
+
+        {/* live points */}
+        <div className="rounded-2xl bg-gradient-to-l from-pink-50 to-violet-50 border-2 border-pink-100 p-4 text-center mb-4">
+          <p className="text-[11px] font-extrabold text-gray-400 mb-0.5">الرصيد الحالي (لحظي)</p>
+          <p className="text-4xl font-extrabold text-pink-600 tabular-nums">⭐ {livePoints}</p>
+        </div>
+
+        {/* amount input */}
+        <label htmlFor="redeem-amount" className="text-xs font-extrabold text-gray-500 mb-1 block">عدد النقاط المراد خصمها</label>
+        <input id="redeem-amount" type="number" min="1" inputMode="numeric" dir="ltr" autoFocus
+          className="input text-center text-2xl font-extrabold !py-3 mb-3" placeholder="0"
+          value={amount} onChange={(e) => { setAmount(e.target.value); setMsg(null) }}
+          onKeyDown={(e) => e.key === 'Enter' && !busy && doRedeem()} />
+
+        {msg && (
+          <p className={`text-sm font-extrabold text-center mb-3 animate-pop ${msg.ok ? 'text-emerald-600' : 'text-red-500'}`}>{msg.text}</p>
+        )}
+
+        {/* خصم */}
+        <button onClick={doRedeem} disabled={busy || !(parseInt(amount) > 0)}
+          className="w-full rounded-2xl bg-pink-600 text-white font-extrabold py-4 text-base active:scale-95 transition-all shadow-lg shadow-pink-600/25 disabled:opacity-40">
+          {busy ? 'جاري...' : '🎁 خصم'}
+        </button>
+
+        {/* undo */}
+        {lastTx && (
+          <button onClick={undo} disabled={busy}
+            className="w-full mt-2 rounded-xl bg-gray-100 text-gray-500 font-extrabold py-2 text-xs active:scale-95 transition-all disabled:opacity-40">
+            ↩️ تراجع عن آخر خصم ({lastTx.points} نقطة)
+          </button>
+        )}
+      </div>
     </div>
   )
 }

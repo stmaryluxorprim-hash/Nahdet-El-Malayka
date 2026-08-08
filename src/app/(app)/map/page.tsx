@@ -30,6 +30,33 @@ export default function MapPage() {
   const [now, setNow] = useState(() => Date.now())
   const wrapRef = useRef<HTMLDivElement>(null)
 
+  // ---- مزامنة ساعة السيرفر (حتى لو ساعة الجهاز غير مظبوطة يظل المؤقّت موحّداً للجميع) ----
+  const [clockOffset, setClockOffset] = useState(0) // serverTime - localTime (ms)
+  const clockOffsetRef = useRef(0)
+  const syncClock = useCallback(async () => {
+    try {
+      const supabase = getSupabase()
+      let best: { offset: number; rtt: number } | null = null
+      for (let i = 0; i < 3; i++) {
+        const t0 = Date.now()
+        const { data, error } = await supabase.rpc('server_now')
+        const t1 = Date.now()
+        if (error || !data) return // الدالة غير موجودة → نكمل بساعة الجهاز
+        const rtt = t1 - t0
+        const offset = new Date(data as string).getTime() + rtt / 2 - t1
+        if (!best || rtt < best.rtt) best = { offset, rtt }
+      }
+      if (best) { clockOffsetRef.current = best.offset; setClockOffset(best.offset) }
+    } catch {}
+  }, [])
+  useEffect(() => {
+    syncClock()
+    const t = setInterval(syncClock, 5 * 60 * 1000) // إعادة مزامنة كل 5 دقائق
+    return () => clearInterval(t)
+  }, [syncClock])
+  // الوقت الحالي بتوقيت السيرفر (للكتابة في قاعدة البيانات)
+  const serverNowIso = () => new Date(Date.now() + clockOffsetRef.current).toISOString()
+
   const load = useCallback(async () => {
     const supabase = getSupabase()
     const [st, tm, rm, asg] = await Promise.all([
@@ -48,9 +75,9 @@ export default function MapPage() {
   useEffect(() => { load() }, [load])
   useRealtime(['carnival_state', 'carnival_teams', 'carnival_rooms', 'carnival_assignments'], load)
 
-  // tick every second while running
+  // tick (4x/sec لعرض ثوانٍ دقيقة بدون قفزات)
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 500)
+    const t = setInterval(() => setNow(Date.now()), 250)
     return () => clearInterval(t)
   }, [])
 
@@ -73,9 +100,10 @@ export default function MapPage() {
     if (!state) return roundSeconds
     if (state.paused_remaining !== null && state.paused_remaining !== undefined) return state.paused_remaining
     if (!state.started_at) return roundSeconds
-    const elapsed = Math.floor((now - new Date(state.started_at).getTime()) / 1000)
+    // نقارن بتوقيت السيرفر (ساعة الجهاز + فرق المزامنة) — فيتطابق العدّ على كل الأجهزة
+    const elapsed = Math.round((now + clockOffset - new Date(state.started_at).getTime()) / 1000)
     return Math.max(0, roundSeconds - elapsed)
-  }, [state, now, roundSeconds])
+  }, [state, now, clockOffset, roundSeconds])
 
   const running = !!state?.started_at && state?.paused_remaining == null && remaining > 0
   const timeUp = !!state?.started_at && state?.paused_remaining == null && remaining <= 0
@@ -151,11 +179,11 @@ export default function MapPage() {
     load()
   }
 
-  const startTimer = () => updState({ started_at: new Date().toISOString(), paused_remaining: null })
+  const startTimer = () => updState({ started_at: serverNowIso(), paused_remaining: null })
   const pauseTimer = () => updState({ paused_remaining: remaining })
   const resumeTimer = () => {
-    // restart started_at so that elapsed = roundSeconds - paused_remaining
-    const startedAt = new Date(Date.now() - (roundSeconds - (state?.paused_remaining ?? roundSeconds)) * 1000)
+    // restart started_at so that elapsed = roundSeconds - paused_remaining (بتوقيت السيرفر)
+    const startedAt = new Date(Date.now() + clockOffsetRef.current - (roundSeconds - (state?.paused_remaining ?? roundSeconds)) * 1000)
     updState({ started_at: startedAt.toISOString(), paused_remaining: null })
   }
   const resetTimer = () => updState({ started_at: null, paused_remaining: null })
@@ -164,7 +192,7 @@ export default function MapPage() {
     const round = Math.min(Math.max(1, r), total)
     updState({
       current_round: round,
-      started_at: autoStart ? new Date().toISOString() : null,
+      started_at: autoStart ? serverNowIso() : null,
       paused_remaining: null,
     })
   }
@@ -323,7 +351,7 @@ export default function MapPage() {
                       dark ? 'bg-gray-800 text-gray-200' : 'bg-gray-100 text-gray-600'}`}>
                     الجولة السابقة
                   </button>
-                  {!running && !paused && (
+                  {!running && !paused && !timeUp && (
                     <button onClick={startTimer} className="rounded-2xl px-5 py-2.5 text-sm font-extrabold bg-emerald-600 text-white active:scale-95 transition-all shadow-lg shadow-emerald-600/25">
                       ▶️ ابدأ الجولة
                     </button>
@@ -344,10 +372,11 @@ export default function MapPage() {
                       🔄 إعادة
                     </button>
                   )}
-                  <button onClick={() => goRound(state.current_round + 1)} disabled={state.current_round >= state.total_rounds}
-                    className={`rounded-2xl px-3 py-2.5 text-sm font-extrabold active:scale-95 transition-all disabled:opacity-30 ${
-                      timeUp ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/30 animate-pulse' : dark ? 'bg-gray-800 text-gray-200' : 'bg-gray-100 text-gray-600'}`}>
-                    الجولة التالية ⬅️
+                  {/* زر واحد: الجولة التالية + بدء العدّ فوراً */}
+                  <button onClick={() => goRound(state.current_round + 1, true)} disabled={state.current_round >= state.total_rounds}
+                    className={`rounded-2xl px-4 py-2.5 text-sm font-extrabold active:scale-95 transition-all disabled:opacity-30 ${
+                      timeUp ? 'bg-violet-600 text-white shadow-lg shadow-violet-600/30 animate-pulse' : 'bg-violet-600 text-white shadow-lg shadow-violet-600/25'}`}>
+                    ▶️ الجولة التالية وابدأ
                   </button>
                 </div>
               )}
@@ -592,7 +621,7 @@ function SetupModal({ open, onClose, state, teams, rooms, assignments, reload }:
                 className={`rounded-2xl border-2 p-3 text-right transition-all active:scale-[0.98] ${
                   !autoAdvance ? 'border-violet-600 bg-violet-50' : 'border-gray-100 bg-white'}`}>
                 <p className={`font-extrabold text-sm ${!autoAdvance ? 'text-violet-700' : 'text-gray-600'}`}>✋ يدوي</p>
-                <p className="text-[10px] font-bold text-gray-400 mt-0.5 leading-relaxed">يرنّ الجرس وينتظر حتى تضغط «الجولة التالية» بنفسك</p>
+                <p className="text-[10px] font-bold text-gray-400 mt-0.5 leading-relaxed">يرنّ الجرس وينتظر حتى تضغط «الجولة التالية وابدأ» بنفسك</p>
               </button>
               <button type="button" onClick={() => setAutoAdvance(true)}
                 className={`rounded-2xl border-2 p-3 text-right transition-all active:scale-[0.98] ${
